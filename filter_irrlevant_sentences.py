@@ -118,8 +118,8 @@ sent_num = len(id2sent_dict)
 print("sentences num", sent_num)
 
 ### load user, item, candidate sent id, target sent id
-pair_file = "test_example_100.json"
-pair_abs_file = os.path.join(dataset_path, pair_file)
+input_pair_file = "test_example_100.json"
+pair_abs_file = os.path.join(dataset_path, input_pair_file)
 print("pair file", pair_abs_file)
 
 data = []
@@ -166,10 +166,6 @@ for data_idx in range(data_num):
 
     candidate_num_list.append(candidate_num_i)
 
-# print("mean num", np.mean(candidate_num_list), np.sqrt(np.var(candidate_num_list)))
-
-# exit()
-
 # """
     # print("before candidate_num_i", candidate_num_i)
     if candidate_num_i > 12000:
@@ -212,49 +208,29 @@ for data_idx in range(data_num):
 
     target_i = list(nonzero_index.numpy())
     data_i["target"] = target_i
-    # print("target sentence num", len(target_i))
-
-    # print(target_i)
-    # print("review_i", review_i)
-
-    # embed_ij = get_sentence_embed(sent_ij)
-    # for j in range(candidate_num_i):
-    #     target_flag = False
-    #     embed_ij = candidate_embed_i[j]
-
-    #     for k in range(review_num_i):
-    #         # review_ik = review_i[k] 
-    #         # sent_ik = id2sent_dict[review_ik]
-    #         # embed_ik = get_sentence_embed(sent_ik)
-    #         # embed_ik = id2sentembed_dict[review_ik]
-
-    #         embed_ik = review_embed_i[k]
-
-    #         # print(embed_ij.size())
-    #         # print(embed_ik.size())
-    #         sim_jk = F.cosine_similarity(embed_ij.unsqueeze(0), embed_ik.unsqueeze(0))
-    #         # print("sim_jk", sim_jk)
-    #         if sim_jk > sim_threshold:
-    #             target_flag = True
-    #             break
-
-        # if target_flag:
-        #     target_i.append(candidate_ij)
-    
-    # if len(target_i):
-    #     data_i["target"] = target_i
-    # else:
-    #     print("!!! target zero !!!")
         
 end_time = time.time()
 
 duration = end_time-start_time
 print("duration", duration)
-### cal similarities among candidate sentences and target sentences
 
 
-### filter sentences that are not that similar to any target sentences
+outputput_pair_file = "new_test_example_100.json"
+output_pair_abs_file = os.path.join(dataset_path, outputput_pair_file)
+print("output pair file", output_pair_abs_file)
 
+with open(output_pair_abs_file, "w") as f:
+    for data_idx in range(data_num):
+        data_i = data[data_idx]
+        user_i = data_i["user"]
+        item_i = data_i["item"]
+        candidate_i = [i.item() for i in data_i["target"]]
+        review_i = [i for i in list(data_i["review"])]
+        
+        # print(candidate_i)
+        # print(review_i)
 
-### save sentence ids to the output
-# """
+        line = {"user": user_i, "item": item_i, "candidate": candidate_i, "review": review_i}
+
+        json.dump(line, f)
+        f.write("\n")
