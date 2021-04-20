@@ -98,25 +98,32 @@ if __name__ == "__main__":
 
     ### data
     parser.add_argument('--data_dir', type=str, default='data')
-    parser.add_argument('--data_name', type=str, default='movielens')
+    parser.add_argument('--data_name', type=str, default='ratebeer')
     parser.add_argument('--data_file', type=str, default='data.pickle')
     
     parser.add_argument('--vocab_file', type=str, default='vocab.json')
     parser.add_argument('--model_file', type=str, default="model_best.pt")
-    parser.add_argument('--model_name', type=str, default="MF")
+    parser.add_argument('--model_name', type=str, default="graph_sentence_extractor")
     parser.add_argument('--model_path', type=str, default="../checkpoint/")
 
     ### model
-    parser.add_argument('--user_emb_size', type=int, default=300)
-    parser.add_argument('--item_emb_size', type=int, default=300)
-    
-    parser.add_argument('--output_hidden_size', type=int, default=300)
+    parser.add_argument('--user_embed_size', type=int, default=256)
+    parser.add_argument('--item_embed_size', type=int, default=256)
+    parser.add_argument('--feature_embed_size', type=int, default=256)
+    parser.add_argument('--sent_embed_size', type=int, default=256)
+    parser.add_argument('--hidden_size', type=int, default=256)
+    # parser.add_argument('--output_hidden_size', type=int, default=256)
+    parser.add_argument('--head_num', type=int, default=4)
+    parser.add_argument('--ffn_inner_hidden_size', type=int, default=256)
+
 
     ### train
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--weight_decay', type=float, default=0.0)
     parser.add_argument('--l2_reg', type=float, default=0.0)
+    parser.add_argument('--attn_dropout_rate', type=float, default=0.02)
+    parser.add_argument('--ffn_dropout_rate', type=float, default=0.02)
 
     parser.add_argument('--learning_rate', type=float, default=0.0001)
     parser.add_argument('--momentum', type=float, default=0.99)

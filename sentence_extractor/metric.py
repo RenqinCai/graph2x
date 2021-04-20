@@ -12,7 +12,7 @@ def get_example_recall_precision(pred, target, k=1):
     precision = 0.0
 
     pred = list(pred.numpy())
-    target = list(target.numpy())
+    # target = list(target.numpy())
 
     true_pos = set(target) & set(pred)
     true_pos_num = len(true_pos)

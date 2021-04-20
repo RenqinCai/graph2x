@@ -10,24 +10,36 @@ from collections import Counter
 import dgl
 from dgl.data.utils import save_graphs, load_graphs
 
+def readJson(fname):
+    data = []
+    line_num = 0
+    with open(fname, encoding="utf-8") as f:
+        for line in f:
+            # print("line", line)
+            line_num += 1
+            try:
+                data.append(json.loads(line))
+            except:
+                print("error", line_num)
+    return data
 
 class Vocab():
     def __init__(self):
 
-        self.m_user2uid = None
-        self.m_item2iid = None
+        self.m_user2uid = {}
+        self.m_item2iid = {}
 
         self.m_user_num = 0
         self.m_item_num = 0
 
-        self.m_feature2fid = None
+        self.m_feature2fid = {}
         self.m_feature_num = 0
 
-        self.m_sent2sid = None
+        self.m_sent2sid = {}
         self.m_sent_num = 0
 
-        self.m_fid2fembed = None
-        self.m_sid2sembed = None
+        self.m_fid2fembed = {}
+        self.m_sid2sembed = {}
         
     def f_set_user2uid_vocab(self, user2uid):
         self.m_user2uid = user2uid
@@ -45,247 +57,58 @@ class Vocab():
         self.m_sent2sid = sent2sid
         self.m_sent_num = len(self.m_sent2sid)
 
-    def f_set_id_vocab(self, user2uid, item2iid, feature2fid, sent2sid):
-        self.m_user2uid = user2uid
-        self.m_item2iid = item2iid
-        self.m_feature2fid = feature2fid
-        self.m_sent2sid = sent2sid
-        
-        self.m_user_num = len(self.m_user2uid)
-        self.m_item_num = len(self.m_item2iid)
-        self.m_feature_num = len(self.m_feature2fid)
-        self.m_sent_num = len(self.m_sent2sid)
-        
-    def f_set_embed_vocab(self, fid2fembed, sid2sembed):
-        if sid2sembed != None:
-            self.m_fid2fembed = fid2fembed
-        if sid2sembed != None:
-            self.m_sid2sembed = sid2sembed
+    def f_load_sent_content_train(self, sent_content_file):
 
-    @property
-    def user_num(self):
-        return self.m_user_num
+        self.m_sid2swords = {}
+
+        sent_content = readJson(sent_content_file)[0]
+
+        sentid_list = list(sent_content.keys())
+
+        sent_num = len(sent_content)
+        for sent_idx in range(sent_num):
+            sentid_i = sentid_list[sent_idx]
+
+            if sentid_i not in self.m_sent2sid:
+                sid_i = len(self.m_sent2sid)
+                self.m_sent2sid[sentid_i] = sid_i
+
+            sid_i = self.m_sent2sid[sentid_i]
+
+            sentwords_i = sent_content[sentid_i]
+
+            self.m_sid2swords[sid_i] = sentwords_i
+
+        print("load sent num train", len(self.m_sid2swords))
+
+    def f_load_sent_content_eval(self, sent_content_file):
+        sent_content = readJson(sent_content_file)[0]
+
+        sentid_list = list(sent_content.keys())
+
+        train_sent_num = len(self.m_sent2sid)
+        print("train_sent_num", train_sent_num)
+        sent_num = len(sent_content)
+        for sent_idx in range(sent_num):
+            sentid_i = sentid_list[sent_idx]
+            sentwords_i = sent_content[sentid_i]
+
+            sentid_i = train_sent_num+int(sentid_i)
+            sentid_i = str(sentid_i)
+
+            if sentid_i not in self.m_sent2sid:
+                sid_i = len(self.m_sent2sid)
+                self.m_sent2sid[sentid_i] = sid_i
+
+            sid_i = self.m_sent2sid[sentid_i]
+            
+            self.m_sid2swords[sid_i] = sentwords_i
+
+        print("load sent num eval", sent_num)
     
-    @property
-    def item_num(self):
-        return self.m_item_num
-
-    @property
-    def feature_num(self):
-        return self.m_feature_num
-
-    @property
-    def sent_num(self):
-        return self.m_sent_num
-
-
-def readJson(fname):
-    data = []
-    with open(fname, encoding="utf-8") as f:
-        for line in f:
-            data.append(json.loads(line))
-    return data
-
-class RATEBEER(Dataset):
-    def __init__(self):
-        super().__init__()
-
-        self.m_uid2fid2tfidf_dict = {}
-        self.m_iid2fid2tfidf_dict = {}
-        self.m_sid2fid2tfidf_dict = {}
-
-        self.m_uid_list = []
-        self.m_iid_list = []
-        self.m_cdd_sid_list_list = []
-        self.m_label_sid_list_list = []
-
-    def load_sent_feature(self, vocab, sent_feature_file):
-        ### sent_feature {sentid: {featureid: feature tf-idf}}
-        sid2fid2tfidf_dict = {}
-
-        sentid2fid2tfidf = readJson(sent_feature_file)
-        sent_num = len(sentid2fid2tfidf)
-
-        sent2sid_dict = vocab.m_sent2sid
-
-        feature2fid_dict = {}
-
-        if sent_num != vocab.sent_num:
-            print("sent num error", sent_num, vocab.sent_num)
-
-        for i in range(sent_num):
-            data_i = sentid2fid2tfidf[i]
-
-            sentid_i = list(data_i.keys())[0]
-            featureid_tfidf_dict_i = data_i[sentid_i]
-
-            sid_i = sent2sid_dict[sentid_i]
-            if sid_i not in sid2fid2tfidf_dict:
-                sid2fid2tfidf_dict[sid_i] = {}
-
-            for feautreid_ij in featureid_tfidf_dict_i:
-                if feautreid_ij not in feature2fid_dict:
-                    feature2fid_dict[feautreid_ij] = len(feature2fid_dict)
-                
-                fid_ij = feature2fid_dict[feautreid_ij]
-                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
-                
-                sid2fid2tfidf_dict[sid_i][fid_ij] = tfidf_ij
-
-        feature2fid_dict["PAD"] = len(feature2fid_dict)
-        vocab.m_pad_fid = feature2fid_dict["PAD"]
-        vocab.f_set_feature2fid_vocab(feature2fid_dict)
-
-        self.m_sid2fid2tfidf_dict = sid2fid2tfidf_dict
-
-    def load_user_feature(self, vocab, user_feature_file):
-        ### user_feature {userid: {featureid: feature tf-idf}}
-        uid2fid2tfidf_dict = {}
-
-        userid2fid2tfidf = readJson(user_feature_file)
-        user_num = len(userid2fid2tfidf)
-
-        user2uid_dict = vocab.m_user2uid
-        feature2fid_dict = vocab.m_feature2fid
-
-        if user_num != vocab.user_num:
-            print("user num error", user_num, vocab.user_num)
-
-        for i in range(user_num):
-            data_i = userid2fid2tfidf[i]
-
-            userid_i = list(data_i.keys())[0]
-            featureid_tfidf_dict_i = data_i[userid_i]
-
-            uid_i = user2uid_dict[userid_i]
-            if uid_i not in uid2fid2tfidf_dict:
-                uid2fid2tfidf_dict[uid_i] = {}
-
-            for feautreid_ij in featureid_tfidf_dict_i:
-                if feautreid_ij not in feature2fid_dict:
-                    print("error missing feature", userid_i, feautreid_ij)
-                    continue
-                
-                fid_ij = feature2fid_dict[feautreid_ij]
-                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
-                
-                uid2fid2tfidf_dict[uid_i][fid_ij] = tfidf_ij
-
-        self.m_uid2fid2tfidf_dict = uid2fid2tfidf_dict
-        
-    def load_item_feature(self, vocab, item_feature_file):
-        ### item_feature {itemid: {featureid: feature tf-idf}}
-        iid2fid2tfidf_dict = {}
-
-        itemid2fid2tfidf = readJson(item_feature_file)
-        item_num = len(itemid2fid2tfidf)
-
-        if item_num != vocab.item_num:
-            print("item num error", item_num, vocab.item_num)
-
-        item2iid_dict = vocab.m_item2iid
-        feature2fid_dict = vocab.m_feature2fid
-
-        for i in range(item_num):
-            data_i = item2iid_dict[i]
-
-            itemid_i = list(data_i.keys())[0]
-            featureid_tfidf_dict_i = data_i[itemid_i]
-
-            iid_i = item2iid_dict[itemid_i]
-            if iid_i not in iid2fid2tfidf_dict:
-                iid2fid2tfidf_dict[iid_i] = {}
-
-            for feautreid_ij in featureid_tfidf_dict_i:
-                if feautreid_ij not in feature2fid_dict:
-                    print("error missing feature", itemid_i, feautreid_ij)
-                    continue
-                
-                fid_ij = feature2fid_dict[feautreid_ij]
-                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
-                
-                iid2fid2tfidf_dict[iid_i][fid_ij] = tfidf_ij
-
-        self.m_iid2fid2tfidf_dict = iid2fid2tfidf_dict
-
-    def load_useritem_cdd_label_sent(self, useritem_candidate_label_sent_file):
-        #### read pair data 
-        user2uid_dict = {}
-        item2iid_dict = {}
-        sent2sid_dict = {}
-
-        uid_list = []
-        iid_list = []
-        cdd_sid_list_list = []
-        label_sid_list_list = []
-
-        #### useritem_sent {userid: {itemid: [cdd_sentid] [label_sentid]}}
-        useritem_cdd_label_sent = readJson(useritem_candidate_label_sent_file)
-        useritem_cdd_label_sent_num = len(useritem_cdd_label_sent)
-        print("useritem_cdd_label_sent_num", useritem_cdd_label_sent_num)
-
-        for i in range(useritem_cdd_label_sent_num):
-            data_i = useritem_cdd_label_sent[i]
-
-            userid_i = list(data_i.keys())[0]
-            itemid_list_i = list(data_i[userid_i].keys())
-
-            for itemid_ij in itemid_list_i:
-                cdd_sentid_list_ij = data_i[userid_i][itemid_ij][0]
-
-                if userid_i not in user2uid_dict:
-                    user2uid_dict[userid_i] = len(user2uid_dict)
-
-                if itemid_ij not in item2iid_dict:
-                    item2iid_dict[itemid_ij] = len(item2iid_dict)
-
-                cdd_sid_list_i = []
-                for sentid_ijk in cdd_sentid_list_ij:
-                    if len(sentid_ijk) == 0:
-                        continue
-                        
-                    if sentid_ijk not in sent2sid_dict:
-                        sent2sid_dict[sentid_ijk] = len(sent2sid_dict)
-                    cdd_sid_list_i.append(sent2sid_dict[sentid_ijk])
-
-                label_sentid_list_ij = data_i[userid_i][itemid_ij][1]
-                label_sid_list_i = []
-
-                for sentid_ijk in label_sentid_list_ij:
-                    if len(sentid_ijk) == 0:
-                        continue
-                        
-                    if sentid_ijk not in sent2sid_dict:
-                        sent2sid_dict[sentid_ijk] = len(sent2sid_dict)
-                    label_sid_list_i.append(sent2sid_dict[sentid_ijk])
-
-                uid_i = user2uid_dict[userid_i]
-                iid_i = item2iid_dict[itemid_ij]
-                
-                uid_list.append(uid_i)
-                iid_list.append(iid_i)
-                cdd_sid_list_list.append(cdd_sid_list_i)
-                label_sid_list_list.append(label_sid_list_i)
-
-        sent2sid_dict["PAD"] = len(sent2sid_dict)
-        self.m_pad_sid = sent2sid_dict["PAD"]
-
-        self.m_uid_list = uid_list
-        self.m_iid_list = iid_list
-        self.m_cdd_sid_list_list = cdd_sid_list_list
-        self.m_label_sid_list_list = label_sid_list_list        
-
-        vocab_obj = Vocab()
-        vocab_obj.f_set_user2uid_vocab(user2uid_dict)
-        vocab_obj.f_set_item2iid_vocab(item2iid_dict)
-        vocab_obj.f_set_sent2sid_vocab(sent2sid_dict)
-
-        return vocab_obj
-
-    def load_sent_embed(self, vocab, sent_embed_file):
+    def f_load_sent_embed(self, sent_embed_file):
         ### sid 2 embed
-        sid2embed_dict = {}
-        sent2sid_dict = vocab.sent2sid_dict
+        sent2sid_dict = self.m_sent2sid
 
         sent_embed = readJson(sent_embed_file)
         sent_embed_num = len(sent_embed)
@@ -303,51 +126,194 @@ class RATEBEER(Dataset):
                 continue
             
             sid_i = sent2sid_dict[sentid_i]
-            if sid_i not in sid2embed_dict:
-                sid2embed_dict[sid_i] = sentembed_i
-        
-        vocab.f_set_embed_vocab(None, sid2embed_dict)
+            if sid_i not in self.m_sid2sembed:
+                self.m_sid2sembed[sid_i] = sentembed_i
+    
+    def f_load_feature_embed(self, feature_embed_file):
+        self.m_feature2fid = {}
+        self.m_fid2fembed = {}
 
-    def load_feature_embed(self, vocab, feature_embed_file):
-        fid2embed_dict = {}
-        feature2fid_dict = vocab.feature2fid_dict
-
-        feature_embed = readJson(feature_embed_file)
+        feature_embed = readJson(feature_embed_file)[0]
         feature_embed_num = len(feature_embed)
         print("feature_embed_num", feature_embed_num)
 
-        for i in range(feature_embed_num):
-            data_i = feature_embed[i]
+        featureid_list = list(feature_embed.keys())
+        for featureid_i in featureid_list:
+            featureembed_i = feature_embed[featureid_i]
+            
+            if featureid_i not in self.m_feature2fid:
+                fid_i = len(self.m_feature2fid)
+                self.m_feature2fid[featureid_i] = fid_i
 
-            featureid_i = list(data_i.keys())[0]
-            featureembed_i = data_i[featureid_i]
+            fid_i = self.m_feature2fid[featureid_i]
+            if fid_i not in self.m_fid2fembed:
+                self.m_fid2fembed[fid_i] = featureembed_i        
 
-            if featureid_i not in feature2fid_dict:
-                print("error missing feature", featureid_i)
+    @property
+    def user_num(self):
+        return self.m_user_num
+    
+    @property
+    def item_num(self):
+        return self.m_item_num
+
+    @property
+    def feature_num(self):
+        return self.m_feature_num
+
+    @property
+    def sent_num(self):
+        return self.m_sent_num
+
+class RATEBEER(Dataset):
+    def __init__(self):
+        super().__init__()
+
+        self.m_uid2fid2tfidf_dict = {}
+        self.m_iid2fid2tfidf_dict = {}
+        self.m_sid2fid2tfidf_dict = {}
+
+        self.m_uid_list = []
+        self.m_iid_list = []
+        self.m_cdd_sid_list_list = []
+        self.m_label_sid_list_list = []
+
+    def load_user_feature(self, vocab, user_feature_file):
+        ### user_feature {userid: {featureid: feature tf-idf}}
+        uid2fid2tfidf_dict = {}
+
+        userid2fid2tfidf = readJson(user_feature_file)[0]
+        user_num = len(userid2fid2tfidf)
+
+        user2uid_dict = {}
+        feature2fid_dict = {}
+
+        if user_num != vocab.user_num:
+            print("user num error", user_num, vocab.user_num)
+
+        userid_list = userid2fid2tfidf.keys()
+        userid_list = list(userid_list)
+        for i in range(user_num):
+
+            userid_i = userid_list[i]
+            featureid_tfidf_dict_i = userid2fid2tfidf[userid_i]
+
+            if userid_i not in user2uid_dict:
+                uid_i = len(user2uid_dict)
+                user2uid_dict[userid_i] = uid_i
+
+            uid_i = user2uid_dict[userid_i]
+            if uid_i not in uid2fid2tfidf_dict:
+                uid2fid2tfidf_dict[uid_i] = {}
+
+            for feautreid_ij in featureid_tfidf_dict_i:
+                if feautreid_ij not in feature2fid_dict:
+                    fid_ij = len(feature2fid_dict)
+                    feature2fid_dict[feautreid_ij] = fid_ij
+                
+                fid_ij = feature2fid_dict[feautreid_ij]
+                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
+                
+                uid2fid2tfidf_dict[uid_i][fid_ij] = tfidf_ij
+
+        self.m_uid2fid2tfidf_dict = uid2fid2tfidf_dict
+
+        vocab.f_set_user2uid_vocab(user2uid_dict)
+        vocab.f_set_feature2fid_vocab(feature2fid_dict)
+
+    def load_item_feature(self, vocab, item_feature_file):
+        ### item_feature {itemid: {featureid: feature tf-idf}}
+        iid2fid2tfidf_dict = {}
+
+        itemid2fid2tfidf = readJson(item_feature_file)[0]
+        item_num = len(itemid2fid2tfidf)
+
+        if item_num != vocab.item_num:
+            print("item num error", item_num, vocab.item_num)
+
+        item2iid_dict = {}
+        feature2fid_dict = vocab.m_feature2fid
+
+        itemid_list = itemid2fid2tfidf.keys()
+        itemid_list = list(itemid_list)
+        for i in range(item_num):
+
+            itemid_i = itemid_list[i]
+            featureid_tfidf_dict_i = itemid2fid2tfidf[itemid_i]
+
+            if itemid_i not in item2iid_dict:
+                iid_i = len(item2iid_dict)
+                item2iid_dict[itemid_i] = iid_i
+
+            iid_i = item2iid_dict[itemid_i]
+            if iid_i not in iid2fid2tfidf_dict:
+                iid2fid2tfidf_dict[iid_i] = {}
+
+            for feautreid_ij in featureid_tfidf_dict_i:
+                
+                if feautreid_ij not in feature2fid_dict:
+                    fid_ij = len(feature2fid_dict)
+                    feature2fid_dict[feautreid_ij] = fid_ij
+                
+                fid_ij = feature2fid_dict[feautreid_ij]
+                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
+                
+                iid2fid2tfidf_dict[iid_i][fid_ij] = tfidf_ij
+
+        self.m_iid2fid2tfidf_dict = iid2fid2tfidf_dict
+
+        vocab.f_set_item2iid_vocab(item2iid_dict)
+        vocab.f_set_feature2fid_vocab(feature2fid_dict)
+    
+    def load_sent_feature(self, vocab, sent_feature_file):
+        ### sent_feature {sentid: {featureid: feature tf-idf}}
+        sid2fid2tfidf_dict = {}
+
+        sentid2fid2tfidf = readJson(sent_feature_file)[0]
+        sent_num = len(sentid2fid2tfidf)
+
+        sent2sid_dict = vocab.m_sent2sid
+
+        feature2fid_dict = vocab.m_feature2fid
+
+        if sent_num != vocab.sent_num:
+            print("sent num error", sent_num, vocab.sent_num)
+
+        sentid_list = sentid2fid2tfidf.keys()
+        sentid_list = list(sentid_list)
+        for i in range(sent_num):
+            sentid_i = sentid_list[i]
+            featureid_tfidf_dict_i = sentid2fid2tfidf[sentid_i]
+
+        # for i in range(sent_num):
+        #     data_i = sentid2fid2tfidf[i]
+
+        #     sentid_i = list(data_i.keys())[0]
+        #     featureid_tfidf_dict_i = data_i[sentid_i]
+
+            if sentid_i not in sent2sid_dict:
+                print("error missing sent", sentid_i)
                 continue
 
-            fid_i = feature2fid_dict[featureid_i]
-            if fid_i not in fid2embed_dict:
-                fid2embed_dict[fid_i] = featureembed_i
+            sid_i = sent2sid_dict[sentid_i]
+            if sid_i not in sid2fid2tfidf_dict:
+                sid2fid2tfidf_dict[sid_i] = {}
 
-        vocab.f_set_embed_vocab(fid2embed_dict, None)
+            for feautreid_ij in featureid_tfidf_dict_i:
+                if feautreid_ij not in feature2fid_dict:
+                    print("error missing feature", feautreid_ij)
+                    continue
 
-    def load_train_data(self, useritem_candidate_label_sent_file, sent_feature_file, user_feature_file, item_feature_file, feature_embed_file, sent_embed_file):
+                fid_ij = feature2fid_dict[feautreid_ij]
+                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
+                
+                sid2fid2tfidf_dict[sid_i][fid_ij] = tfidf_ij
 
-        vocab_obj = self.load_useritem_cdd_label_sent(useritem_candidate_label_sent_file)
-        self.load_sent_feature(vocab_obj, sent_feature_file)
-        self.load_user_feature(vocab_obj, user_feature_file)
-        self.load_item_feature(vocab_obj, item_feature_file)
+        self.m_sid2fid2tfidf_dict = sid2fid2tfidf_dict
 
-        self.load_feature_embed(vocab_obj, feature_embed_file)
-        self.load_sent_embed(vocab_obj, sent_embed_file)
-
-        print("... load train data ...", len(self.m_uid_list), len(self.m_iid_list), len(self.m_cdd_sid_list_list))
-
-        return vocab_obj
-
-    def load_useritem_cdd_label_sent_eval(self, vocab, useritem_candidate_label_sent_file):
+    def load_useritem_cdd_label_sent(self, vocab, useritem_candidate_label_sent_file, test_flag=False):
         #### read pair data 
+
         user2uid_dict = vocab.m_user2uid
         item2iid_dict = vocab.m_item2iid
         sent2sid_dict = vocab.m_sent2sid
@@ -358,109 +324,113 @@ class RATEBEER(Dataset):
         label_sid_list_list = []
 
         #### useritem_sent {userid: {itemid: [cdd_sentid] [label_sentid]}}
-        useritem_cdd_label_sent = readJson(useritem_candidate_label_sent_file)
+        useritem_cdd_label_sent = readJson(useritem_candidate_label_sent_file)[0]
         useritem_cdd_label_sent_num = len(useritem_cdd_label_sent)
         print("useritem_cdd_label_sent_num", useritem_cdd_label_sent_num)
 
-        for i in range(useritem_cdd_label_sent_num):
-            data_i = useritem_cdd_label_sent[i]
+        train_sent_num = len(vocab.m_sent2sid)
 
-            userid_i = list(data_i.keys())[0]
-            itemid_list_i = list(data_i[userid_i].keys())
+        userid_list = useritem_cdd_label_sent.keys()
+        userid_list = list(userid_list)
+        user_num = len(userid_list)
+
+        for i in range(user_num):
+            # data_i = useritem_cdd_label_sent[i]
+
+            # userid_i = list(data_i.keys())[0]
+            userid_i = userid_list[i]
+            itemid_list_i = list(useritem_cdd_label_sent[userid_i].keys())
 
             for itemid_ij in itemid_list_i:
-                cdd_sentid_list_ij = data_i[userid_i][itemid_ij][0]
+                cdd_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][0]
 
                 if userid_i not in user2uid_dict:
-                    print("user id missing", userid_i)
+                    print("error missing user", userid_i)
                     continue
 
+                uid_i = user2uid_dict[userid_i]
+
                 if itemid_ij not in item2iid_dict:
-                    print("item id missing", itemid_ij)
+                    print("error missing item", itemid_ij)
                     continue
+                
+                iid_ij = item2iid_dict[itemid_ij]
 
                 cdd_sid_list_i = []
                 for sentid_ijk in cdd_sentid_list_ij:
-                    if len(sentid_ijk) == 0:
-                        continue
+                    # if len(sentid_ijk) == 0:
+                    #     continue
                         
                     if sentid_ijk not in sent2sid_dict:
-                        print("sent id missing", sentid_ijk)
+                        print("error missing cdd sent", sentid_ijk)
                         continue
 
-                    cdd_sid_list_i.append(sent2sid_dict[sentid_ijk])
+                    sid_ijk = sent2sid_dict[sentid_ijk]
+                    cdd_sid_list_i.append(sid_ijk)
 
-                label_sentid_list_ij = data_i[userid_i][itemid_ij][1]
+                label_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][1]
                 label_sid_list_i = []
 
                 for sentid_ijk in label_sentid_list_ij:
-                    if len(sentid_ijk) == 0:
-                        continue
-                        
-                    if sentid_ijk not in sent2sid_dict:
-                        print("sent id missing", sentid_ijk)
-                        continue
-                        
-                    label_sid_list_i.append(sent2sid_dict[sentid_ijk])
+                    
+                    if test_flag:
+                        sentid_ijk = train_sent_num+int(sentid_ijk)
+                        sentid_ijk = str(sentid_ijk)
 
-                uid_i = user2uid_dict[userid_i]
-                iid_i = item2iid_dict[itemid_ij]
+                    if sentid_ijk not in sent2sid_dict:
+                        # print("error missing label sent", sentid_ijk)
+                        continue
+                    
+                    sid_ijk = sent2sid_dict[sentid_ijk]
+                    label_sid_list_i.append(sid_ijk)
+
+                if len(label_sid_list_i) == 0:
+                    continue
+                # uid_i = user2uid_dict[userid_i]
+                # iid_i = item2iid_dict[itemid_ij]
                 
                 uid_list.append(uid_i)
-                iid_list.append(iid_i)
+                iid_list.append(iid_ij)
                 cdd_sid_list_list.append(cdd_sid_list_i)
                 label_sid_list_list.append(label_sid_list_i)
-
-        sent2sid_dict["PAD"] = len(sent2sid_dict)
-        self.m_pad_sid = sent2sid_dict["PAD"]
 
         self.m_uid_list = uid_list
         self.m_iid_list = iid_list
         self.m_cdd_sid_list_list = cdd_sid_list_list
         self.m_label_sid_list_list = label_sid_list_list        
 
-    def load_sent_feature_eval(self, vocab, sent_feature_file):
-        ### sent_feature {sentid: {featureid: feature tf-idf}}
-        sid2fid2tfidf_dict = {}
+    def load_train_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file):
 
-        sentid2fid2tfidf = readJson(sent_feature_file)
-        sent_num = len(sentid2fid2tfidf)
+        vocab_obj = Vocab()
+        print("... load sentence content ...")
 
-        sent2sid_dict = vocab.m_sent2sid
+        vocab_obj.f_load_sent_content_train(sent_content_file)
 
-        feature2fid_dict = vocab.m_feature2fid
+        print("... load sentence embed ...")
+        vocab_obj.f_load_sent_embed(sent_embed_file)
 
-        if sent_num != vocab.sent_num:
-            print("sent num error", sent_num, vocab.sent_num)
+        print("... load feature embed ...")
+        vocab_obj.f_load_feature_embed(feature_embed_file)
 
-        for i in range(sent_num):
-            data_i = sentid2fid2tfidf[i]
+        print("... load user feature ...")
+        self.load_user_feature(vocab_obj, user_feature_file)
 
-            sentid_i = list(data_i.keys())[0]
-            featureid_tfidf_dict_i = data_i[sentid_i]
+        print("... load item feature ...")
+        self.load_item_feature(vocab_obj, item_feature_file)
 
-            sid_i = sent2sid_dict[sentid_i]
-            if sid_i not in sid2fid2tfidf_dict:
-                sid2fid2tfidf_dict[sid_i] = {}
+        print("... load sentence feature ...")
+        self.load_sent_feature(vocab_obj, sent_feature_file)
 
-            for feautreid_ij in featureid_tfidf_dict_i:
-                if feautreid_ij not in feature2fid_dict:
-                    print("error missing feature", feautreid_ij)
-                    continue
-                
-                fid_ij = feature2fid_dict[feautreid_ij]
-                tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
-                
-                sid2fid2tfidf_dict[sid_i][fid_ij] = tfidf_ij
+        self.load_useritem_cdd_label_sent(vocab_obj, useritem_candidate_label_sent_file)
 
-        self.m_sid2fid2tfidf_dict = sid2fid2tfidf_dict
+        print("... load train data ...", len(self.m_uid_list), len(self.m_iid_list), len(self.m_cdd_sid_list_list))
 
-    def load_eval_data(self, vocab, useritem_candidate_label_sent_file, sent_feature_file, user_feature_file, item_feature_file, feature_embed_file, sent_embed_file):
-        self.load_useritem_cdd_label_sent_eval(vocab, useritem_candidate_label_sent_file)
-        self.load_sent_feature(vocab, sent_feature_file)
-        self.load_user_feature(vocab, user_feature_file)
-        self.load_item_feature(vocab, item_feature_file)
-        
+        return vocab_obj
+
+    def load_eval_data(self, vocab, sent_content_file, useritem_candidate_label_sent_file):
+        vocab.f_load_sent_content_eval(sent_content_file)
+        self.load_useritem_cdd_label_sent(vocab, useritem_candidate_label_sent_file, True)
+
     def __len__(self):
         return len(self.m_uid_list)
 
@@ -586,13 +556,13 @@ class RATEBEER(Dataset):
         G.set_e_initializer(dgl.init.zero_initializer)
 
         label = np.zeros(sent_node_num)
-        labelid_list = [sid2nid_dict[i] for i in label_list]
+        labelid_list = [sid2nid[i] for i in label_list]
         label[np.array(labelid_list)] = 1
 
         G.nodes[sid2nid].data["label"] = torch.LongTensor(label)
 
         return G
-
+    
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
@@ -619,7 +589,4 @@ class RATEBEER(Dataset):
         example = {"user":uid_i, "item":iid_i, "cdd_sid":cdd_sid_list_i, "label_sid":label_sid_list_i}
 
         return example
-
-
-    
 

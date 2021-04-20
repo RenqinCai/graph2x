@@ -24,30 +24,31 @@ class DATA():
     def f_load_ratebeer(self, args):
         self.m_data_name = args.data_name
 
-        useritem_candidate_label_sen_file = args.data_dir+"train/user_item_cdd_label_sen.json"
-        sent_embed_file = args.data_dir+"train/sent_embed.json"
-        sent_feature_file = args.data_dir+"train/sent_feature.json"
-        user_feature_file = args.data_dir+"train/user_feature.json"
-        item_feature_file = args.data_dir+"train/item_feature.json"
+        sent_content_file = args.data_dir+"train/id2sentence.json"
+        sent_embed_file = args.data_dir+"train/sent2embed.json"
+        feature_embed_file = args.data_dir+"train/feature2embed.json"
+        
+        useritem_candidate_label_sen_file = args.data_dir+"train/useritem2sentids.json"
+        
+        user_feature_file = args.data_dir+"train/user2feature.json"
+        item_feature_file = args.data_dir+"train/item2feature.json"
+
+        sent_feature_file = args.data_dir+"train/sentence2feature.json"
         
         train_data = RATEBEER()
-        vocab_obj = train_data.load_train_data(useritem_candidate_label_sen_file, sent_embed_file, sent_feature_file, user_feature_file, item_feature_file)
+        vocab_obj = train_data.load_train_data(sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sen_file, user_feature_file, item_feature_file, sent_feature_file)
 
-        useritem_candidate_label_sen_file = args.data_dir+"valid/user_item_cdd_label_sen.json"
-        sent_embed_file = args.data_dir+"valid/sent_embed.json"
-        sent_feature_file = args.data_dir+"valid/sent_feature.json"
-        user_feature_file = args.data_dir+"valid/user_feature.json"
-        item_feature_file = args.data_dir+"valid/item_feature.json"
+        sent_content_file = args.data_dir+"valid/id2sentence.json"
+        useritem_candidate_label_sen_file = args.data_dir+"valid/useritem2sentids_test.json"
         
         valid_data = RATEBEER()
-        valid_data.load_eval_data(vocab_obj, useritem_candidate_label_sen_file, sent_embed_file, sent_feature_file, user_feature_file, item_feature_file)
+        valid_data.load_eval_data(vocab_obj, sent_content_file, useritem_candidate_label_sen_file)
 
         batch_size = args.batch_size
 
         train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=graph_collate_fn)
 
         valid_loader = DataLoader(dataset=valid_data, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=graph_collate_fn)
-
 
         return train_loader, valid_loader, vocab_obj
 

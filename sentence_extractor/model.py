@@ -19,24 +19,24 @@ class GraphX(nn.Module):
         item_num = vocab_obj.item_num
         feature_num = vocab_obj.feature_num
 
-        self.m_user_embed = nn.Embedding(user_num, args.user_embed_dim)
-        self.m_item_embed = nn.Embedding(item_num, args.item_embed_dim)
+        self.m_user_embed = nn.Embedding(user_num, args.user_embed_size)
+        self.m_item_embed = nn.Embedding(item_num, args.item_embed_size)
 
         self.m_feature_embed = vocab_obj.m_fid2fembed
-        self.m_feature_embed_size = args.feature_embed_dim
+        self.m_feature_embed_size = args.feature_embed_size
 
         self.m_sent_embed = vocab_obj.m_sid2sembed
-        self.m_sent_embed_size = args.sent_embed_dim
+        self.m_sent_embed_size = args.sent_embed_size
 
-        self.sent_state_proj = nn.Linear(args.sent_state_size, args.hidden_size)
-        self.user_state_proj = nn.Linear(args.user_state_size, args.hidden_size, bias=False)
-        self.item_state_proj = nn.Linear(args.item_state_size, args.hidden_size, bias=False)
+        self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size)
+        self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
+        self.item_state_proj = nn.Linear(args.item_embed_size, args.hidden_size, bias=False)
 
         self.m_n_iter = args.n_iter
 
-        self.feature2sent = WSWGAT(in_dim=args.embed_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, feat_embed_size=args.feat_embed_size, layer_type="W2S")
+        self.feature2sent = WSWGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, layer_type="W2S")
 
-        self.sent2feature = WSWGAT(in_dim=args.embed_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, feat_embed_size=args.feat_embed_size, layer_type="S2W")
+        self.sent2feature = WSWGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, layer_type="S2W")
 
         ### node classification
         # self.output_hidden_size = args.output_hidden_size
@@ -99,7 +99,7 @@ class GraphX(nn.Module):
         snid2iid = {}
 
         for inode_id in inode_id_list:
-            fnodes = [nid for nid in graph.predecessors(inode_i) if graph.nodes[nid].data["dtype"] == 0]
+            fnodes = [nid for nid in graph.predecessors(inode_id) if graph.nodes[nid].data["dtype"] == 0]
             i_embed_f = graph.nodes[fnodes].data["init_state"].mean(dim=0)
             assert not torch.any(torch.isnan(i_embed)), "item embed element"
 

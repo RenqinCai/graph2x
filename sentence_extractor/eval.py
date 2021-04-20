@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_recall
+from metric import get_example_recall_precision
 
 class EVAL(object):
     def __init__(self, vocab_obj, args, device):

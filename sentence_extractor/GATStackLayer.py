@@ -5,11 +5,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class MultiHeadLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, head_num, attn_drop_out, feat_embed_size, layer, merge='cat'):
+    def __init__(self, in_dim, out_dim, head_num, attn_drop_out, layer, merge='cat'):
         super(MultiHeadLayer, self).__init__()
         self.heads = nn.ModuleList()
         for i in range(head_num):
-            self.heads.append(layer(in_dim, out_dim, feat_embed_size))  # [n_nodes, hidden_size]
+            self.heads.append(layer(in_dim, out_dim))  # [n_nodes, hidden_size]
         self.merge = merge
         self.dropout = nn.Dropout(attn_drop_out)
 
@@ -45,7 +45,7 @@ class PositionwiseFeedForward(nn.Module):
         return output
 
 class WSGATLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, feat_embed_size):
+    def __init__(self, in_dim, out_dim):
         super().__init__()
         self.fc = nn.Linear(in_dim, out_dim, bias=False)
 
@@ -90,7 +90,7 @@ class WSGATLayer(nn.Module):
         return h[snode_id]
 
 class SWGATLayer(nn.Module):
-    def __init__(self, in_dim, out_dim, feat_embed_size):
+    def __init__(self, in_dim, out_dim):
         super().__init__()
         self.fc = nn.Linear(in_dim, out_dim, bias=False)
 
