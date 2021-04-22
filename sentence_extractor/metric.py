@@ -6,6 +6,9 @@ import torch.nn.functional as F
 import numpy as np
 from collections import Counter 
 import bottleneck as bn
+import collections
+import math
+
 
 def get_example_recall_precision(pred, target, k=1):
     recall = 0.0
@@ -24,29 +27,64 @@ def get_example_recall_precision(pred, target, k=1):
 
     return recall, precision
 
-# def get_recall(preds, targets, mask, targetnum, k=1):
-#     preds = preds.view(-1, preds.size(1))
+def _get_ngrams(segment, max_order):
+    ngram_counts = collections.Counter()
+    for order in range(1, max_order+1):
+        for i in range(0, len(segment)-order+1):
+            ngram = tuple(segment[i:i+order])
+            ngram_counts[ngram] += 1
 
-#     preds.scatter_(1, mask, float("-inf"))
-#     preds[:, 0] = float("-inf")
-    
-#     top_vals, indices = torch.topk(preds, k, -1)
+    return ngram_counts
 
-#     recall_list = []
+def compute_bleu(references, hypotheses, max_order=4, smooth=False):
+    matches_by_order = [0]*max_order
+    possible_matches_by_order = [0]*max_order
 
-#     for i, pred_index in enumerate(indices):
-#         pred_i = list(pred_index.numpy())
-#         target_i = targets[i].numpy()
-#         # len_i = sum(target_i != 0)
-#         num_i = targetnum[i].item()
-#         target_i = list(target_i)[:num_i]
-    
-#         true_pos = set(target_i) & set(pred_i)
-#         true_pos_num = len(true_pos)
+    reference_length = 0
+    hypothesis_length = 0
 
-#         recall = true_pos_num/num_i
-#         recall_list.append(recall)
+    for (reference, hypothesis) in zip(references, hypotheses):
+        reference_length += min(len(r) for r in references)
+        hypothesis_length += len(hypothesis)
 
-#     avg_recall = np.mean(recall_list)
+        merged_ref_ngram_counts = collections.Counter()
+        for reference in references:
+            merged_ref_ngram_counts |= _get_ngrams(reference, max_order)
+        
+        hyp_ngram_counts = _get_ngrams(hypothesis, max_order)
+        overlap = hyp_ngram_counts & merged_ref_ngram_counts
 
-#     return avg_recall
+        for ngram in overlap:
+            matches_by_order[len(ngram)-1] += overlap[ngram]
+        
+        for order in range(1, max_order+1):
+            possible_matches = len(hypothesis)-order+1
+            if possible_matches > 0:
+                possible_matches_by_order[order-1] += possible_matches
+
+    precisions = [0]*max_order
+    for i in range(0, max_order):
+        if smooth:
+            precisions[i] = ((matches_by_order[i]+1.0)/(possible_matches_by_order[i]+1.0))
+        else:
+            if possible_matches_by_order[i] > 0:
+                precisions[i] = (float(matches_by_order[i])/possible_matches_by_order[i])
+            else:
+                precisions[i] = 0.0
+
+    if min(precisions) > 0:
+        p_log_sum = sum((1.0/max_order)*math.log(p) for p in precisions)
+        geo_mean = math.exp(p_log_sum)
+    else:
+        geo_mean = 0
+
+    ratio = float(hypothesis_length) / reference_length
+
+    if ratio > 1.0:
+        bp = 1.0
+    else:
+        bp = math.exp(1-1.0/ratio)
+
+    bleu = geo_mean*bp
+
+    return bleu

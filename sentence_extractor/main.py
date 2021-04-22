@@ -115,7 +115,7 @@ if __name__ == "__main__":
     # parser.add_argument('--output_hidden_size', type=int, default=256)
     parser.add_argument('--head_num', type=int, default=4)
     parser.add_argument('--ffn_inner_hidden_size', type=int, default=256)
-
+    
 
     ### train
     parser.add_argument('--batch_size', type=int, default=128)
@@ -124,12 +124,11 @@ if __name__ == "__main__":
     parser.add_argument('--l2_reg', type=float, default=0.0)
     parser.add_argument('--attn_dropout_rate', type=float, default=0.02)
     parser.add_argument('--ffn_dropout_rate', type=float, default=0.02)
-
+    parser.add_argument('--grad_clip', action="store_true", default=True)
     parser.add_argument('--learning_rate', type=float, default=0.0001)
     parser.add_argument('--momentum', type=float, default=0.99)
     parser.add_argument('--epoch_num', type=int, default=10)
     parser.add_argument('--print_interval', type=int, default=200)
-    parser.add_argument('--hcdmg1', action="store_true", default=False)
     
     ### hyper-param
     # parser.add_argument('--init_mult', type=float, default=1.0)

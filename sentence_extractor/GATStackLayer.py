@@ -50,7 +50,7 @@ class WSGATLayer(nn.Module):
         self.fc = nn.Linear(in_dim, out_dim, bias=False)
 
         # self.feat_fc = nn.Linear(feat_embed_size, out_dim, bias=False)
-        self.attn_fc = nn.Linear(3 * out_dim, 1, bias=False)
+        self.attn_fc = nn.Linear(2* out_dim, 1, bias=False)
 
     def edge_attention(self, edges):
 
@@ -61,8 +61,16 @@ class WSGATLayer(nn.Module):
         z2 = torch.cat([edges.src['z'], edges.dst['z']], dim=1)  # [edge_num, 3 * out_dim]
         wa = F.leaky_relu(self.attn_fc(z2))  # [edge_num, 1]
 
+        # print('wa', wa.size())
+        
         ### combine tf-idf
-        wa = F.softmax(edges.data["weight"]*wa, dim=-1)
+        tfidf_edge_weight = edges.data["weight"]
+        # print("edges weight tfidf", tfidf_edge_weight.size())
+        tfidf_edge_weight = tfidf_edge_weight.view(-1, 1)
+
+        wa = tfidf_edge_weight*wa
+
+        # print("wa", wa.size())
 
         return {'e': wa}
 
@@ -71,7 +79,12 @@ class WSGATLayer(nn.Module):
         return {'z': edges.src['z'], 'e': edges.data['e']}
 
     def reduce_func(self, nodes):
-        alpha = F.softmax(nodes.mailbox['e'], dim=1)
+        e = nodes.mailbox['e']
+        # print("e", e.size())
+        alpha = F.softmax(e, dim=1)
+
+        # print("alpha", alpha.size())
+
         h = torch.sum(alpha * nodes.mailbox['z'], dim=1)
         return {'sh': h}
 
@@ -83,6 +96,9 @@ class WSGATLayer(nn.Module):
         # print(wnode_id, snode_id, wsedge_id)
         z = self.fc(h)
         g.nodes[wnode_id].data['z'] = z
+        
+
+
         g.apply_edges(self.edge_attention, edges=wsedge_id)
         g.pull(snode_id, self.message_func, self.reduce_func)
         g.ndata.pop('z')
@@ -95,7 +111,7 @@ class SWGATLayer(nn.Module):
         self.fc = nn.Linear(in_dim, out_dim, bias=False)
 
         # self.feat_fc = nn.Linear(feat_embed_size, out_dim)
-        self.attn_fc = nn.Linear(3 * out_dim, 1, bias=False)
+        self.attn_fc = nn.Linear(2 * out_dim, 1, bias=False)
 
     def edge_attention(self, edges):
         # dfeat = self.feat_fc(edges.data["tfidfembed"])  # [edge_num, out_dim]
@@ -103,7 +119,11 @@ class SWGATLayer(nn.Module):
         wa = F.leaky_relu(self.attn_fc(z2))  # [edge_num, 1]
 
         ### combine tf-idf
-        wa = F.softmax(edges.data["weight"]*wa, dim=-1)
+        # wa = F.softmax(edges.data["weight"]*wa, dim=-1)
+
+        tfidf_edge_weight = edges.data["weight"]
+        tfidf_edge_weight = tfidf_edge_weight.view(-1, 1)
+        wa = tfidf_edge_weight*wa
 
         return {'e': wa}
 
@@ -112,6 +132,7 @@ class SWGATLayer(nn.Module):
 
     def reduce_func(self, nodes):
         alpha = F.softmax(nodes.mailbox['e'], dim=1)
+        
         h = torch.sum(alpha * nodes.mailbox['z'], dim=1)
         return {'sh': h}
 

@@ -25,8 +25,8 @@ class DATA():
         self.m_data_name = args.data_name
 
         sent_content_file = args.data_dir+"train/id2sentence.json"
-        sent_embed_file = args.data_dir+"train/sent2embed.json"
-        feature_embed_file = args.data_dir+"train/feature2embed.json"
+        sent_embed_file = args.data_dir+"train/sid2sentembed.json"
+        feature_embed_file = args.data_dir+"train/featureid2embedding.json"
         
         useritem_candidate_label_sen_file = args.data_dir+"train/useritem2sentids.json"
         
@@ -38,11 +38,11 @@ class DATA():
         train_data = RATEBEER()
         vocab_obj = train_data.load_train_data(sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sen_file, user_feature_file, item_feature_file, sent_feature_file)
 
-        sent_content_file = args.data_dir+"valid/id2sentence.json"
+        sent_content_file = args.data_dir+"valid/id2sentence_test.json"
         useritem_candidate_label_sen_file = args.data_dir+"valid/useritem2sentids_test.json"
         
         valid_data = RATEBEER()
-        valid_data.load_eval_data(vocab_obj, sent_content_file, useritem_candidate_label_sen_file)
+        valid_data.load_eval_data(vocab_obj, train_data.m_uid2fid2tfidf_dict, train_data.m_iid2fid2tfidf_dict, train_data.m_sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sen_file)
 
         batch_size = args.batch_size
 

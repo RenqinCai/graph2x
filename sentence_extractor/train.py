@@ -9,11 +9,12 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from loss import XE_LOSS, BPR_LOSS, SIG_LOSS
-from metric import get_example_recall_precision
+from metric import get_example_recall_precision, compute_bleu
 from model import GraphX
 # from infer_new import _INFER
 import random
 import dgl
+import torch.nn.functional as F
 from rouge import Rouge
 
 class TRAINER(object):
@@ -83,9 +84,9 @@ class TRAINER(object):
                 s_time = datetime.datetime.now()
                 self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
-
                 print("validation epoch duration", e_time-s_time)
-
+                self.m_mean_eval_loss = 0
+                    
                 if last_eval_loss == 0:
                     last_eval_loss = self.m_mean_eval_loss
 
@@ -156,10 +157,12 @@ class TRAINER(object):
 
         tmp_loss_list = []
 
+        start_time = time.time()
+
         network.train()
         # train_data.dataset.f_neg_sample()
 
-        for i, (G, index) in train_data:
+        for i, (G, index) in enumerate(train_data):
             G = G.to(self.m_device)
             iter_start_time = time.time()
 
@@ -167,7 +170,13 @@ class TRAINER(object):
 
             snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
             labels = G.ndata["label"][snode_id]
-            G.nodes[snode_id].data["loss"] = self.m_criterion(logits, labels).unsqueeze(-1)
+
+            one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
+            # print(one_hot_labels)
+            node_loss = self.m_criterion(logits, one_hot_labels)
+            # print("node_loss", node_loss.size())
+
+            G.nodes[snode_id].data["loss"] = node_loss
             loss = dgl.sum_nodes(G, "loss")
             loss = loss.mean()
 
@@ -197,7 +206,9 @@ class TRAINER(object):
                            
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_train_iteration, np.mean(loss_list)))
         logger_obj.f_add_scalar2tensorboard("train/loss", np.mean(loss_list), self.m_train_iteration)
-       
+
+        end_time = time.time()
+        print("duration", end_time-start_time)
         self.m_mean_train_loss = np.mean(loss_list)
       
     def f_eval_epoch(self, eval_data, network, optimizer, logger_obj):
@@ -218,6 +229,8 @@ class TRAINER(object):
         rouge_l_p_list = []
         rouge_l_r_list = []
 
+        bleu_list = []
+
         self.m_eval_iteration = self.m_train_iteration
 
         logger_obj.f_add_output2IO(" "*10+" eval the user and item encoder"+" "*10)
@@ -227,17 +240,24 @@ class TRAINER(object):
         network.eval()
         topk = 3
         with torch.no_grad():
-            for i, (G, index) in eval_data:
+            for i, (G, index) in enumerate(eval_data):
                 # eval_flag = random.randint(1,5)
                 # if eval_flag != 2:
                 # 	continue
+                print("... eval ", i)
+
                 G = G.to(self.m_device)
 
                 logits = network(G)
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
 
-                G.nodes[snode_id].data["loss"] = self.m_criterion(logits, labels).unsqueeze(-1)
+                one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
+
+                node_loss = self.m_criterion(logits, one_hot_labels)
+                # print("node_loss", node_loss.size())
+
+                G.nodes[snode_id].data["loss"] = node_loss
                 loss = dgl.sum_nodes(G, "loss")
                 loss = loss.mean()
 
@@ -260,7 +280,7 @@ class TRAINER(object):
                     p_sent_j = p_sent_j.view(-1, 2)
 
                     topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
-                    pred_idx_j = pred_idx_j.cpu()
+                    pred_idx_j = pred_idx_j.cpu().numpy()
 
                     # recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
 
@@ -290,7 +310,10 @@ class TRAINER(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                loss_list.append(loss)
+                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_list.append(bleu_scores_j)
+
+                loss_list.append(loss.item())
                 
             logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
@@ -311,8 +334,11 @@ class TRAINER(object):
         self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
+        self.m_mean_eval_bleu = np.mean(bleu_list)
+
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
         logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
+        logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
 
         # logger_obj.f_add_output2IO("%d, NLL_loss:%.4f, recall@%d:%.4f, precision@%d:%.4f, rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss, topk, self.m_mean_eval_recall, self.m_mean_eval_precision, self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
 

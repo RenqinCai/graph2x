@@ -40,6 +40,9 @@ class Vocab():
 
         self.m_fid2fembed = {}
         self.m_sid2sembed = {}
+
+        self.m_train_sent_num = 0
+        self.m_test_sent_num = 0
         
     def f_set_user2uid_vocab(self, user2uid):
         self.m_user2uid = user2uid
@@ -87,6 +90,7 @@ class Vocab():
         sentid_list = list(sent_content.keys())
 
         train_sent_num = len(self.m_sent2sid)
+        self.m_train_sent_num = train_sent_num
         print("train_sent_num", train_sent_num)
         sent_num = len(sent_content)
         for sent_idx in range(sent_num):
@@ -105,6 +109,7 @@ class Vocab():
             self.m_sid2swords[sid_i] = sentwords_i
 
         print("load sent num eval", sent_num)
+        print("total sent num", len(self.m_sent2sid))
     
     def f_load_sent_embed(self, sent_embed_file):
         ### sid 2 embed
@@ -151,19 +156,28 @@ class Vocab():
 
     @property
     def user_num(self):
+        self.m_user_num = len(self.m_user2uid)
         return self.m_user_num
     
     @property
     def item_num(self):
+        self.m_item_num = len(self.m_item2iid)
         return self.m_item_num
 
     @property
     def feature_num(self):
+        self.m_feature_num = len(self.m_feature2fid)
         return self.m_feature_num
 
     @property
     def sent_num(self):
+        self.m_sent_num = len(self.m_sent2sid)
         return self.m_sent_num
+
+    @property
+    def train_sent_num(self):
+        return self.m_train_sent_num
+        
 
 class RATEBEER(Dataset):
     def __init__(self):
@@ -177,6 +191,9 @@ class RATEBEER(Dataset):
         self.m_iid_list = []
         self.m_cdd_sid_list_list = []
         self.m_label_sid_list_list = []
+
+        ### if this is eval dataset
+        self.m_eval_flag = False
 
     def load_user_feature(self, vocab, user_feature_file):
         ### user_feature {userid: {featureid: feature tf-idf}}
@@ -328,11 +345,13 @@ class RATEBEER(Dataset):
         useritem_cdd_label_sent_num = len(useritem_cdd_label_sent)
         print("useritem_cdd_label_sent_num", useritem_cdd_label_sent_num)
 
-        train_sent_num = len(vocab.m_sent2sid)
+        train_sent_num = vocab.m_train_sent_num
 
         userid_list = useritem_cdd_label_sent.keys()
         userid_list = list(userid_list)
         user_num = len(userid_list)
+
+        # user_num = 2
 
         for i in range(user_num):
             # data_i = useritem_cdd_label_sent[i]
@@ -378,13 +397,14 @@ class RATEBEER(Dataset):
                         sentid_ijk = str(sentid_ijk)
 
                     if sentid_ijk not in sent2sid_dict:
-                        # print("error missing label sent", sentid_ijk)
+                        print("error missing label sent", sentid_ijk)
                         continue
                     
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     label_sid_list_i.append(sid_ijk)
 
                 if len(label_sid_list_i) == 0:
+                    exit()
                     continue
                 # uid_i = user2uid_dict[userid_i]
                 # iid_i = item2iid_dict[itemid_ij]
@@ -401,6 +421,7 @@ class RATEBEER(Dataset):
 
     def load_train_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file):
 
+        """load vocab"""
         vocab_obj = Vocab()
         print("... load sentence content ...")
 
@@ -412,6 +433,8 @@ class RATEBEER(Dataset):
         print("... load feature embed ...")
         vocab_obj.f_load_feature_embed(feature_embed_file)
 
+
+        """load feature"""
         print("... load user feature ...")
         self.load_user_feature(vocab_obj, user_feature_file)
 
@@ -427,9 +450,17 @@ class RATEBEER(Dataset):
 
         return vocab_obj
 
-    def load_eval_data(self, vocab, sent_content_file, useritem_candidate_label_sent_file):
+    def load_eval_data(self, vocab, uid2fid2tfidf_dict, iid2fid2tfidf_dict, sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sent_file):
         vocab.f_load_sent_content_eval(sent_content_file)
+        self.m_uid2fid2tfidf_dict = uid2fid2tfidf_dict
+        self.m_iid2fid2tfidf_dict = iid2fid2tfidf_dict
+        self.m_sid2fid2tfidf_dict = sid2fid2tfidf_dict
+
         self.load_useritem_cdd_label_sent(vocab, useritem_candidate_label_sent_file, True)
+
+        print("... load test data ...", len(self.m_uid_list), len(self.m_iid_list), len(self.m_cdd_sid_list_list))
+
+        self.m_eval_flag = True
 
     def __len__(self):
         return len(self.m_uid_list)
@@ -439,6 +470,7 @@ class RATEBEER(Dataset):
         nid2fid = {}
 
         nid = 0
+
         fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
         for fid in fid2tfidf_dict_user:
             if fid not in fid2nid.keys():
@@ -471,7 +503,7 @@ class RATEBEER(Dataset):
         G.set_n_initializer(dgl.init.zero_initializer)
         G.ndata["unit"] = torch.zeros(fid_node_num)
         G.ndata["id"] = torch.LongTensor(list(nid2fid.values()))
-        G.ndata["dytpe"] = torch.zeros(fid_node_num)
+        G.ndata["dtype"] = torch.zeros(fid_node_num)
 
         return fid2nid, nid2fid
 
@@ -534,7 +566,7 @@ class RATEBEER(Dataset):
                 G.add_edge(nid_s, nid_f, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
     
         for i in range(user_node_num):
-            nid_u = uid2nid[0]
+            nid_u = list(nid2uid.keys())[0]
             fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
 
             for fid in fid2tfidf_dict_user:
@@ -544,7 +576,7 @@ class RATEBEER(Dataset):
                 G.add_edge(nid_u, nid_f, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
 
         for i in range(item_node_num):
-            nid_i = iid2nid[0]
+            nid_i = list(nid2iid.keys())[0]
             fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
 
             for fid in fid2tfidf_dict_item:
@@ -556,10 +588,14 @@ class RATEBEER(Dataset):
         G.set_e_initializer(dgl.init.zero_initializer)
 
         label = np.zeros(sent_node_num)
-        labelid_list = [sid2nid[i] for i in label_list]
-        label[np.array(labelid_list)] = 1
+        if not self.m_eval_flag:
+            labelid_list = [sid2nid[i]-feature_node_num for i in label_list]
+            label[np.array(labelid_list)] = 1
 
-        G.nodes[sid2nid].data["label"] = torch.LongTensor(label)
+        label_tensor = torch.LongTensor(label).unsqueeze(1)
+        # print("label_tensor", label_tensor)
+        
+        G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
 
         return G
     
