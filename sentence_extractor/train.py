@@ -35,6 +35,8 @@ class TRAINER(object):
         self.m_mean_val_loss = 0
         self.m_mean_eval_precision = 0
         self.m_mean_eval_recall = 0
+
+        self.m_mean_eval_bleu = 0
         
         self.m_epochs = args.epoch_num
         self.m_batch_size = args.batch_size
@@ -75,6 +77,8 @@ class TRAINER(object):
 
         # best_eval_precision = 0
         best_eval_recall = 0
+
+        best_eval_bleu = 0
         # self.f_init_word_embed(pretrain_word_embed, network)
         try: 
             for epoch in range(self.m_epochs):
@@ -120,11 +124,11 @@ class TRAINER(object):
                     print("last train loss %.4f"%last_train_loss, "cur train loss %.4f"%self.m_mean_train_loss)
                     last_train_loss = self.m_mean_train_loss
 
-                if best_eval_recall < self.m_mean_eval_recall:
+                if best_eval_bleu < self.m_mean_eval_bleu:
                         print("... saving model ...")
                         checkpoint = {'model':network.state_dict()}
                         self.f_save_model(checkpoint)
-                        best_eval_recall = self.m_mean_eval_recall
+                        best_eval_bleu = self.m_mean_eval_bleu
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
@@ -163,8 +167,11 @@ class TRAINER(object):
         # train_data.dataset.f_neg_sample()
 
         for i, (G, index) in enumerate(train_data):
-            G = G.to(self.m_device)
             iter_start_time = time.time()
+            G = G.to(self.m_device)
+            
+            iter_end_time = time.time()
+            print("duration 0", iter_end_time-iter_start_time)
 
             logits = network(G)
 
@@ -201,8 +208,8 @@ class TRAINER(object):
 
                 tmp_loss_list = []
 
-                iter_end_time = time.time()
-                print("duration", iter_end_time-iter_start_time)
+            iter_end_time = time.time()
+            print("duration", iter_end_time-iter_start_time)
                            
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_train_iteration, np.mean(loss_list)))
         logger_obj.f_add_scalar2tensorboard("train/loss", np.mean(loss_list), self.m_train_iteration)
@@ -244,6 +251,7 @@ class TRAINER(object):
                 # eval_flag = random.randint(1,5)
                 # if eval_flag != 2:
                 # 	continue
+                start_time = time.time()
                 print("... eval ", i)
 
                 G = G.to(self.m_device)
@@ -251,6 +259,10 @@ class TRAINER(object):
                 logits = network(G)
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
+
+                end_time = time.time()
+                duration = end_time - start_time
+                print("... one batch 0", duration)
 
                 one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
 
@@ -314,7 +326,11 @@ class TRAINER(object):
                     bleu_list.append(bleu_scores_j)
 
                 loss_list.append(loss.item())
-                
+
+                end_time = time.time()
+                duration = end_time - start_time
+                print("... one batch", duration)
+
             logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
                 

@@ -9,7 +9,9 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision
+from metric import get_example_recall_precision, compute_bleu
+from rouge import Rouge
+import dgl
 
 class EVAL(object):
     def __init__(self, vocab_obj, args, device):
@@ -40,22 +42,123 @@ class EVAL(object):
     def f_eval_new(self, train_data, eval_data):
 
         recall_list = []
+        precision_list = []
+        F1_list = []
+
+        rouge_1_f_list = []
+        rouge_1_p_list = []
+        rouge_1_r_list = []
+
+        rouge_2_f_list = []
+        rouge_2_p_list = []
+        rouge_2_r_list = []
+
+        rouge_l_f_list = []
+        rouge_l_p_list = []
+        rouge_l_r_list = []
+
+        bleu_list = []
+
+        rouge = Rouge()
 
         print('--'*10)
 
-        topk = 20
+        topk = 3
         self.m_network.eval()
         with torch.no_grad():
+            for i, (G, index) in enumerate(eval_data):
+                # eval_flag = random.randint(1,5)
+                # if eval_flag != 2:
+                # 	continue
+                print("... eval ", i)
 
-            for user_batch, item_batch, mask_item_batch, itemnum_batch in eval_data:
-                
-                user_gpu = user_batch.to(self.m_device)
+                G = G.to(self.m_device)
 
-                logits = self.m_network.f_eval_forward(user_gpu)
-                
-                recall = get_recall(logits.cpu(), item_batch, mask_item_batch, itemnum_batch, k=topk)
-                
-                recall_list.append(recall)
+                logits = self.m_network(G)
+                snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
+                labels = G.ndata["label"][snode_id]
 
-        mean_recall = np.mean(recall_list)
-        print("recall@%d:%.4f"%(topk, mean_recall))
+                one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
+
+                node_loss = self.m_criterion(logits, one_hot_labels)
+                # print("node_loss", node_loss.size())
+
+                G.nodes[snode_id].data["loss"] = node_loss
+                loss = dgl.sum_nodes(G, "loss")
+                loss = loss.mean()
+
+                G.nodes[snode_id].data["p"] = logits
+                glist = dgl.unbatch(G)
+
+                for j in range(len(glist)):
+                    hyps_j = []
+                    refs_j = []
+
+                    idx = index[j]
+                    example_j = eval_data.dataset.get_example(idx)
+                    
+                    label_sid_list_j = example_j["label_sid"]
+
+                    g_j = glist[j]
+                    snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
+                    N = len(snode_id_j)
+                    p_sent_j = g_j.ndata["p"][snode_id_j]
+                    p_sent_j = p_sent_j.view(-1, 2)
+
+                    topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
+                    pred_idx_j = pred_idx_j.cpu().numpy()
+
+                    # recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
+
+                    # recall_list.append(recall_j)
+                    # precision_list.append(precision_j)
+
+                    for sid_k in label_sid_list_j:
+                        hyps_j.append(self.m_sid2swords[sid_k])
+
+                    for sid_k in pred_idx_j:
+                        refs_j.append(self.m_sid2swords[sid_k])
+
+                    hyps_j = " ".join(hyps_j)
+                    refs_j = " ".join(refs_j)
+
+                    print("==="*10)
+                    print("hyps_j", hyps_j)
+                    print("refs_j", refs_j)
+
+                    scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+
+                    rouge_1_f_list.append(scores_j["rouge-1"]["f"])
+                    rouge_1_r_list.append(scores_j["rouge-1"]["r"])
+                    rouge_1_p_list.append(scores_j["rouge-1"]["p"])
+
+                    rouge_2_f_list.append(scores_j["rouge-2"]["f"])
+                    rouge_2_r_list.append(scores_j["rouge-2"]["r"])
+                    rouge_2_p_list.append(scores_j["rouge-2"]["p"])
+
+                    rouge_l_f_list.append(scores_j["rouge-l"]["f"])
+                    rouge_l_r_list.append(scores_j["rouge-l"]["r"])
+                    rouge_l_p_list.append(scores_j["rouge-l"]["p"])
+
+                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_list.append(bleu_scores_j)
+
+                
+        self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
+        self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
+        self.m_mean_eval_rouge_1_p = np.mean(rouge_1_p_list)
+
+        self.m_mean_eval_rouge_2_f = np.mean(rouge_2_f_list)
+        self.m_mean_eval_rouge_2_r = np.mean(rouge_2_r_list)
+        self.m_mean_eval_rouge_2_p = np.mean(rouge_2_p_list)
+
+        self.m_mean_eval_rouge_l_f = np.mean(rouge_l_f_list)
+        self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
+        self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
+
+        self.m_mean_eval_bleu = np.mean(bleu_list)
+
+        print("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
+        print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
+        print("bleu:%.4f"%(self.m_mean_eval_bleu))
+

@@ -8,6 +8,7 @@ import torch.nn.utils.rnn as rnn
 import dgl
 
 from GAT import WSWGAT
+import time
 
 class GraphX(nn.Module):
     def __init__(self, args, vocab_obj, device):
@@ -115,25 +116,26 @@ class GraphX(nn.Module):
         node_embed_list = []
         snid2unid = {}
 
-        for unode_id in unode_id_list:
-            fnodes = [nid for nid in graph.predecessors(unode_id) if graph.nodes[nid].data["dtype"] == 0]
+        # for unode_id in unode_id_list:
+        #     fnodes = [nid for nid in graph.predecessors(unode_id) if graph.nodes[nid].data["dtype"] == 0]
         
-            u_embed_f = graph.nodes[fnodes].data["embed"].mean(dim=0)
-            assert not torch.any(torch.isnan(u_embed_f)), "user embed element"
+        #     u_embed_f = graph.nodes[fnodes].data["embed"].mean(dim=0)
+        #     assert not torch.any(torch.isnan(u_embed_f)), "user embed element"
 
-            uid = graph.nodes[unode_id].data["id"]
-            u_embed_b = self.m_user_embed(uid)
+        #     uid = graph.nodes[unode_id].data["id"]
+        uids = graph.nodes[unode_id_list].data["id"]
+        u_embed_b = self.m_user_embed(uids)
+        node_embed = u_embed_b
+            # u_embed = u_embed_b+u_embed_f
+            # # print("u embed", u_embed.size())
+            # # u_embed = torch.cat([u_embed_f, u_embed_b])
 
-            u_embed = u_embed_b+u_embed_f
-            # print("u embed", u_embed.size())
-            # u_embed = torch.cat([u_embed_f, u_embed_b])
-
-            node_embed_list.append(u_embed)
+            # node_embed_list.append(u_embed)
 
             # for s in snodes:
             #     snid2unid[int(s)] = unode_id
 
-        node_embed = torch.cat(node_embed_list, dim=0)
+        # node_embed = torch.cat(node_embed_list, dim=0)
 
         return node_embed
 
@@ -142,19 +144,23 @@ class GraphX(nn.Module):
         node_embed_list = []
         snid2iid = {}
 
-        for inode_id in inode_id_list:
-            fnodes = [nid for nid in graph.predecessors(inode_id) if graph.nodes[nid].data["dtype"] == 0]
-            i_embed_f = graph.nodes[fnodes].data["embed"].mean(dim=0)
-            assert not torch.any(torch.isnan(i_embed_f)), "item embed element"
+        iids = graph.nodes[inode_id_list].data["id"]
+        i_embed_b = self.m_item_embed(iids)
+        node_embed = i_embed_b
 
-            iid = graph.nodes[inode_id].data["id"]
-            i_embed_b = self.m_item_embed(iid)
+        # for inode_id in inode_id_list:
+        #     fnodes = [nid for nid in graph.predecessors(inode_id) if graph.nodes[nid].data["dtype"] == 0]
+        #     i_embed_f = graph.nodes[fnodes].data["embed"].mean(dim=0)
+        #     assert not torch.any(torch.isnan(i_embed_f)), "item embed element"
 
-            i_embed = i_embed_b+i_embed_f
+        #     iid = graph.nodes[inode_id].data["id"]
+        #     i_embed_b = self.m_item_embed(iid)
 
-            node_embed_list.append(i_embed)
+        #     i_embed = i_embed_b+i_embed_f
 
-        node_embed = torch.cat(node_embed_list, dim=0)
+        #     node_embed_list.append(i_embed)
+
+        # node_embed = torch.cat(node_embed_list, dim=0)
 
         return node_embed
 
@@ -173,38 +179,82 @@ class GraphX(nn.Module):
             [sentnum, 2]
         """
 
+        start_time = time.time()
+
+        fnode_id = graph.filter_nodes(lambda nodes: nodes.data["unit"]==0)
+        fsedge_id = graph.filter_edges(lambda edges: edges.data["dtype"]==0)
+
         snode_id = graph.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
-        unode_id = graph.filter_nodes(lambda nodes: nodes.data["dtype"] == 2)
+
         inode_id = graph.filter_nodes(lambda nodes: nodes.data["dtype"] == 3)
+
+        unode_id = graph.filter_nodes(lambda nodes: nodes.data["dtype"] == 2)
+
+        end_time = time.time()
+        print("duration 0", end_time-start_time)
+
+        fid = graph.nodes[fnode_id].data["id"]
+        f_embed = self.m_feature_embed(fid)
+        
+        sid = graph.nodes[snode_id].data["id"]
+        s_embed = self.m_sent_embed(sid)
+
+        iids = graph.nodes[inode_id].data["id"]
+        i_embed = self.m_item_embed(iids)
+
+        uids = graph.nodes[unode_id].data["id"]
+        u_embed = self.m_user_embed(uids)
+
+        graph.nodes[fnode_id].data["embed"] = f_embed
+        etf = graph.edges[fsedge_id].data["tffrac"]
+        
+        ### normalize the tfidf to get the weight
+        graph.edges[fsedge_id].data["weight"] = etf
 
         supernode_id = graph.filter_nodes(lambda nodes: nodes.data["unit"] == 1)
 
+        end_time = time.time()
+        print("duration 1", end_time-start_time)
+
+
         ### feature, sentence, 
-        feature_embed = self.set_fnembed(graph)
-        sent_init_state = self.sent_state_proj(self.set_snembed(graph))
+        # feature_embed = self.set_fnembed(graph)
+        # sent_init_state = self.sent_state_proj(self.set_snembed(graph))
+        
+        # user_embed = self.set_unembed(graph)
+        
+        feature_state = f_embed
 
-        ### user, item node init
-        graph.nodes[snode_id].data["init_state"] = sent_init_state
+        sent_state = self.sent_state_proj(s_embed)
 
-        user_embed = self.set_unembed(graph)
-        user_init_state = self.user_state_proj(user_embed)
-        # print("user size", user_init_state.size())
-        graph.nodes[unode_id].data["init_state"] = user_init_state
-
-        item_embed = self.set_inembed(graph)
-        item_init_state = self.item_state_proj(item_embed)
+        # item_embed = self.set_inembed(graph)
+        item_init_state = self.item_state_proj(i_embed)
         graph.nodes[inode_id].data["init_state"] = item_init_state
 
-        feature_init_state = feature_embed
-        sent_init_state = graph.nodes[supernode_id].data["init_state"]
+        user_init_state = self.user_state_proj(u_embed)
+        # print("user size", user_init_state.size())
+        graph.nodes[unode_id].data["init_state"] = user_init_state
+        
+        ### user, item node init
+        graph.nodes[snode_id].data["init_state"] = sent_state
+            
+        sent_state = graph.nodes[supernode_id].data["init_state"]
 
-        feature_state = feature_init_state
-        sent_state = self.feature2sent(graph, feature_init_state, sent_init_state)
+        end_time = time.time()
+        print("duration 2", end_time-start_time)
+
+        sent_state = self.feature2sent(graph, feature_state, sent_state)
+
+        end_time = time.time()
+        print("duration 3", end_time-start_time)
 
         for i in range(self._n_iter):
-
+            
+            start_time = time.time()
             ### sent -> feature
             feature_state = self.sent2feature(graph, feature_state, sent_state)
+            end_time = time.time()
+            print("duration 4", end_time-start_time)
 
             ### feature -> sent
             sent_state = self.feature2sent(graph, feature_state, sent_state)

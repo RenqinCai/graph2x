@@ -192,6 +192,9 @@ class RATEBEER(Dataset):
         self.m_cdd_sid_list_list = []
         self.m_label_sid_list_list = []
 
+        ### file path
+        self.m_dir_path = ""
+
         ### if this is eval dataset
         self.m_eval_flag = False
 
@@ -433,7 +436,6 @@ class RATEBEER(Dataset):
         print("... load feature embed ...")
         vocab_obj.f_load_feature_embed(feature_embed_file)
 
-
         """load feature"""
         print("... load user feature ...")
         self.load_user_feature(vocab_obj, user_feature_file)
@@ -471,21 +473,21 @@ class RATEBEER(Dataset):
 
         nid = 0
 
-        fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
-        for fid in fid2tfidf_dict_user:
-            if fid not in fid2nid.keys():
-                fid2nid[fid] = nid
-                nid2fid[nid] = fid
+        # fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
+        # for fid in fid2tfidf_dict_user:
+        #     if fid not in fid2nid.keys():
+        #         fid2nid[fid] = nid
+        #         nid2fid[nid] = fid
 
-                nid += 1
+        #         nid += 1
 
-        fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
-        for fid in fid2tfidf_dict_item:
-            if fid not in fid2nid.keys():
-                fid2nid[fid] = nid
-                nid2fid[nid] = fid
+        # fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
+        # for fid in fid2tfidf_dict_item:
+        #     if fid not in fid2nid.keys():
+        #         fid2nid[fid] = nid
+        #         nid2fid[nid] = fid
 
-                nid += 1
+        #         nid += 1
         
         for sid in sid_list:
             fid2tfidf_dict_sent = self.m_sid2fid2tfidf_dict[sid]
@@ -570,6 +572,8 @@ class RATEBEER(Dataset):
             fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
 
             for fid in fid2tfidf_dict_user:
+                if fid not in fid2nid:
+                    continue
                 nid_f = fid2nid[fid]
                 tfidf_user = fid2tfidf_dict_user[fid]
                 G.add_edge(nid_f, nid_u, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
@@ -580,6 +584,8 @@ class RATEBEER(Dataset):
             fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
 
             for fid in fid2tfidf_dict_item:
+                if fid not in fid2nid:
+                    continue
                 nid_f = fid2nid[fid]
                 tfidf_item = fid2tfidf_dict_item[fid]
                 G.add_edge(nid_f, nid_i, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
@@ -605,6 +611,8 @@ class RATEBEER(Dataset):
         
         i = idx
 
+        # file_i = str(i)+"_graph.json"
+        # graph_name = os.path.join(self.m_dir_path, file_i)
         uid_i = self.m_uid_list[i]
         iid_i = self.m_iid_list[i]
         cdd_sid_list_i = self.m_cdd_sid_list_list[i]
