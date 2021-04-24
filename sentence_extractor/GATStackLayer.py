@@ -187,3 +187,76 @@ class SWGATLayer(nn.Module):
         duration = end_time - start_time
         print("... duration 3", duration)
         return h[wnode_id]
+
+class GATLayer(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.fc = nn.Linear(in_dim, out_dim, bias=False)
+
+        # self.feat_fc = nn.Linear(feat_embed_size, out_dim)
+        self.attn_fc = nn.Linear(2 * out_dim, 1, bias=False)
+
+    def edge_attention(self, edges):
+        # start_time = time.time()
+
+        # dfeat = self.feat_fc(edges.data["tfidfembed"])  # [edge_num, out_dim]
+        z2 = torch.cat([edges.src['z'], edges.dst['z']], dim=1)  # [edge_num, 3 * out_dim]
+        wa = F.leaky_relu(self.attn_fc(z2))  # [edge_num, 1]
+
+        # end_time = time.time()
+        # duration = end_time - start_time
+        # print("... edge attent duration 0", duration)
+
+        ### combine tf-idf
+        # wa = F.softmax(edges.data["weight"]*wa, dim=-1)
+
+        tfidf_edge_weight = edges.data["weight"]
+        tfidf_edge_weight = tfidf_edge_weight.view(-1, 1)
+        wa = tfidf_edge_weight*wa
+
+        # end_time = time.time()
+        # duration = end_time - start_time
+        # print("... edge attent duration 1", duration)
+
+        return {'e': wa}
+
+    def message_func(self, edges):
+        return {'z': edges.src['z'], 'e': edges.data['e']}
+
+    def reduce_func(self, nodes):
+        # start_time = time.time()
+        
+
+        alpha = F.softmax(nodes.mailbox['e'], dim=1)
+
+        # end_time = time.time()
+        # duration = end_time - start_time
+        # print("+++ reduce duration 2", duration)
+
+        h = torch.sum(alpha * nodes.mailbox['z'], dim=1)
+        return {'sh': h}
+
+    def forward(self, g, h):
+        # print("=== gat ==")
+        # start_time = time.time()
+
+        z = self.fc(h)
+
+        # end_time = time.time()
+        # duration = end_time - start_time
+        # print("... duration 0", duration)
+
+        g.ndata['z'] = z
+        g.apply_edges(self.edge_attention)
+        # end_time = time.time()
+        # duration = end_time - start_time
+        # print("... duration 1", duration)
+
+        g.update_all(self.message_func, self.reduce_func)
+        g.ndata.pop('z')
+        h = g.ndata.pop('sh')
+
+        # end_time = time.time()
+        # duration = end_time - start_time
+        # print("... duration 3", duration)
+        return h

@@ -246,13 +246,18 @@ class TRAINER(object):
 
         network.eval()
         topk = 3
+
+        start_time = time.time()
+
         with torch.no_grad():
             for i, (G, index) in enumerate(eval_data):
                 # eval_flag = random.randint(1,5)
                 # if eval_flag != 2:
                 # 	continue
-                start_time = time.time()
-                print("... eval ", i)
+                # start_time = time.time()
+                # print("... eval ", i)
+                if i % 100 == 0:
+                    print("... eval ... ", i)
 
                 G = G.to(self.m_device)
 
@@ -327,9 +332,9 @@ class TRAINER(object):
 
                 loss_list.append(loss.item())
 
-                end_time = time.time()
-                duration = end_time - start_time
-                print("... one batch", duration)
+            end_time = time.time()
+            duration = end_time - start_time
+            print("... one epoch", duration)
 
             logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)

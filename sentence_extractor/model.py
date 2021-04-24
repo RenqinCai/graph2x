@@ -7,7 +7,7 @@ import torch.nn.utils.rnn as rnn
 
 import dgl
 
-from GAT import WSWGAT
+from GAT import WSWGAT, ALLGAT
 import time
 
 class GraphX(nn.Module):
@@ -46,9 +46,11 @@ class GraphX(nn.Module):
         self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
         self.item_state_proj = nn.Linear(args.item_embed_size, args.hidden_size, bias=False)
 
-        self.feature2sent = WSWGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, layer_type="W2S")
+        self.m_gat = ALLGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate)
 
-        self.sent2feature = WSWGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, layer_type="S2W")
+        # self.feature2sent = WSWGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, layer_type="W2S")
+
+        # self.sent2feature = WSWGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate, layer_type="S2W")
 
         ### node classification
         # self.output_hidden_size = args.output_hidden_size
@@ -179,7 +181,7 @@ class GraphX(nn.Module):
             [sentnum, 2]
         """
 
-        start_time = time.time()
+        # start_time = time.time()
 
         fnode_id = graph.filter_nodes(lambda nodes: nodes.data["unit"]==0)
         fsedge_id = graph.filter_edges(lambda edges: edges.data["dtype"]==0)
@@ -190,8 +192,8 @@ class GraphX(nn.Module):
 
         unode_id = graph.filter_nodes(lambda nodes: nodes.data["dtype"] == 2)
 
-        end_time = time.time()
-        print("duration 0", end_time-start_time)
+        # end_time = time.time()
+        # print("duration 0", end_time-start_time)
 
         fid = graph.nodes[fnode_id].data["id"]
         f_embed = self.m_feature_embed(fid)
@@ -205,27 +207,23 @@ class GraphX(nn.Module):
         uids = graph.nodes[unode_id].data["id"]
         u_embed = self.m_user_embed(uids)
 
-        graph.nodes[fnode_id].data["embed"] = f_embed
         etf = graph.edges[fsedge_id].data["tffrac"]
         
         ### normalize the tfidf to get the weight
         graph.edges[fsedge_id].data["weight"] = etf
 
-        supernode_id = graph.filter_nodes(lambda nodes: nodes.data["unit"] == 1)
+        # supernode_id = graph.filter_nodes(lambda nodes: nodes.data["unit"] == 1)
 
-        end_time = time.time()
-        print("duration 1", end_time-start_time)
+        # end_time = time.time()
+        # print("duration 1", end_time-start_time)
 
-
-        ### feature, sentence, 
+        # ### feature, sentence, 
         # feature_embed = self.set_fnembed(graph)
         # sent_init_state = self.sent_state_proj(self.set_snembed(graph))
         
         # user_embed = self.set_unembed(graph)
-        
-        feature_state = f_embed
 
-        sent_state = self.sent_state_proj(s_embed)
+        graph.nodes[fnode_id].data["init_state"] = f_embed
 
         # item_embed = self.set_inembed(graph)
         item_init_state = self.item_state_proj(i_embed)
@@ -236,30 +234,33 @@ class GraphX(nn.Module):
         graph.nodes[unode_id].data["init_state"] = user_init_state
         
         ### user, item node init
-        graph.nodes[snode_id].data["init_state"] = sent_state
+        sent_init_state = self.sent_state_proj(s_embed)
+        graph.nodes[snode_id].data["init_state"] = sent_init_state
             
-        sent_state = graph.nodes[supernode_id].data["init_state"]
+        # end_time = time.time()
+        # print("duration 2", end_time-start_time)
+        
+        x = graph.ndata["init_state"]
+        h = self.m_gat(graph, x)
 
-        end_time = time.time()
-        print("duration 2", end_time-start_time)
+        graph.ndata["hidden_state"] = h
+        # sent_state = self.feature2sent(graph, feature_state, sent_state)
 
-        sent_state = self.feature2sent(graph, feature_state, sent_state)
+        # end_time = time.time()
+        # print("duration 3", end_time-start_time)
 
-        end_time = time.time()
-        print("duration 3", end_time-start_time)
-
-        for i in range(self._n_iter):
+        # for i in range(self._n_iter):
             
-            start_time = time.time()
-            ### sent -> feature
-            feature_state = self.sent2feature(graph, feature_state, sent_state)
-            end_time = time.time()
-            print("duration 4", end_time-start_time)
+        #     start_time = time.time()
+        #     ### sent -> feature
+        #     feature_state = self.sent2feature(graph, feature_state, sent_state)
+        #     end_time = time.time()
+        #     print("duration 4", end_time-start_time)
 
-            ### feature -> sent
-            sent_state = self.feature2sent(graph, feature_state, sent_state)
+        #     ### feature -> sent
+        #     sent_state = self.feature2sent(graph, feature_state, sent_state)
 
-        graph.nodes[supernode_id].data["hidden_state"] = sent_state
+        # graph.nodes[supernode_id].data["hidden_state"] = sent_state
 
         s_state_list = []
         for snid in snode_id:
