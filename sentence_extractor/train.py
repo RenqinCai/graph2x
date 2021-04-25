@@ -72,12 +72,12 @@ class TRAINER(object):
     def f_train(self, train_data, valid_data, network, optimizer, logger_obj):
         last_train_loss = 0
         last_eval_loss = 0
+        self.m_mean_eval_loss = 0
 
         overfit_indicator = 0
 
         # best_eval_precision = 0
         best_eval_recall = 0
-
         best_eval_bleu = 0
         # self.f_init_word_embed(pretrain_word_embed, network)
         try: 
@@ -89,7 +89,6 @@ class TRAINER(object):
                 self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
                 print("validation epoch duration", e_time-s_time)
-                self.m_mean_eval_loss = 0
                     
                 if last_eval_loss == 0:
                     last_eval_loss = self.m_mean_eval_loss
@@ -125,10 +124,10 @@ class TRAINER(object):
                     last_train_loss = self.m_mean_train_loss
 
                 if best_eval_bleu < self.m_mean_eval_bleu:
-                        print("... saving model ...")
-                        checkpoint = {'model':network.state_dict()}
-                        self.f_save_model(checkpoint)
-                        best_eval_bleu = self.m_mean_eval_bleu
+                    print("... saving model ...")
+                    checkpoint = {'model':network.state_dict()}
+                    self.f_save_model(checkpoint)
+                    best_eval_bleu = self.m_mean_eval_bleu
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
@@ -167,13 +166,16 @@ class TRAINER(object):
         # train_data.dataset.f_neg_sample()
 
         for i, (G, index) in enumerate(train_data):
-            iter_start_time = time.time()
+            # iter_start_time = time.time()
             G = G.to(self.m_device)
             
-            iter_end_time = time.time()
-            print("duration 0", iter_end_time-iter_start_time)
+            # iter_end_time = time.time()
+            # print("... duration 0 ... ", iter_end_time-iter_start_time)
 
             logits = network(G)
+
+            # iter_end_time = time.time()
+            # print("... duration 1 ... ", iter_end_time-iter_start_time)
 
             snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
             labels = G.ndata["label"][snode_id]
@@ -186,6 +188,9 @@ class TRAINER(object):
             G.nodes[snode_id].data["loss"] = node_loss
             loss = dgl.sum_nodes(G, "loss")
             loss = loss.mean()
+
+            # iter_end_time = time.time()
+            # print("... duration 2 ... ", iter_end_time-iter_start_time)
 
             loss_list.append(loss.item()) 
             
@@ -208,14 +213,14 @@ class TRAINER(object):
 
                 tmp_loss_list = []
 
-            iter_end_time = time.time()
-            print("duration", iter_end_time-iter_start_time)
+            # iter_end_time = time.time()
+            # print("... duration 3... ", iter_end_time-iter_start_time)
                            
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_train_iteration, np.mean(loss_list)))
         logger_obj.f_add_scalar2tensorboard("train/loss", np.mean(loss_list), self.m_train_iteration)
 
         end_time = time.time()
-        print("duration", end_time-start_time)
+        print("+++ duration +++", end_time-start_time)
         self.m_mean_train_loss = np.mean(loss_list)
       
     def f_eval_epoch(self, eval_data, network, optimizer, logger_obj):
@@ -265,9 +270,9 @@ class TRAINER(object):
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
 
-                end_time = time.time()
-                duration = end_time - start_time
-                print("... one batch 0", duration)
+                # end_time = time.time()
+                # duration = end_time - start_time
+                # print("... one batch 0", duration)
 
                 one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
 

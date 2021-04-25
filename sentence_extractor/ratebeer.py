@@ -195,6 +195,8 @@ class RATEBEER(Dataset):
         ### file path
         self.m_dir_path = ""
 
+        self.m_graph_dir_path = ""
+
         ### if this is eval dataset
         self.m_eval_flag = False
 
@@ -422,7 +424,7 @@ class RATEBEER(Dataset):
         self.m_cdd_sid_list_list = cdd_sid_list_list
         self.m_label_sid_list_list = label_sid_list_list        
 
-    def load_train_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file):
+    def load_train_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file, output_dir):
 
         """load vocab"""
         vocab_obj = Vocab()
@@ -450,9 +452,14 @@ class RATEBEER(Dataset):
 
         print("... load train data ...", len(self.m_uid_list), len(self.m_iid_list), len(self.m_cdd_sid_list_list))
 
+        self.f_save_graphs(output_dir)
+
         return vocab_obj
 
-    def load_eval_data(self, vocab, uid2fid2tfidf_dict, iid2fid2tfidf_dict, sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sent_file):
+    def load_train_graph_data(self, graph_dir):
+        self.m_graph_dir_path = graph_dir        
+
+    def load_eval_data(self, vocab, uid2fid2tfidf_dict, iid2fid2tfidf_dict, sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sent_file, output_dir):
         vocab.f_load_sent_content_eval(sent_content_file)
         self.m_uid2fid2tfidf_dict = uid2fid2tfidf_dict
         self.m_iid2fid2tfidf_dict = iid2fid2tfidf_dict
@@ -464,8 +471,52 @@ class RATEBEER(Dataset):
 
         self.m_eval_flag = True
 
+        self.f_save_graphs(output_dir)
+
+    def load_eval_graph_data(self, graph_dir):
+        self.m_graph_dir_path = graph_dir        
+
+    def f_save_graphs(self, output_dir):
+        self.m_dir_path = output_dir
+
+        graph_num = len(self.m_uid_list)
+        # graph_num = 100
+        for graph_idx in range(graph_num):
+
+            if graph_idx % 1e5 == 0:
+                print("graph idx", graph_idx)
+
+            i = graph_idx
+            uid_i = self.m_uid_list[i]
+            iid_i = self.m_iid_list[i]
+            cdd_sid_list_i = self.m_cdd_sid_list_list[i]
+            label_sid_list_i = self.m_label_sid_list_list[i]
+
+            g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, label_sid_list_i)
+            gt_label_i = {"gt_label": torch.tensor(label_sid_list_i)}
+
+            g_file_i = self.m_dir_path+str(i)+".bin"
+            save_graphs(g_file_i, [g_i], gt_label_i)
+        
+        print("finish saving files", graph_num)
+
     def __len__(self):
-        return len(self.m_uid_list)
+        graph_dir_path = self.m_graph_dir_path
+
+        file_num = 0
+
+        print("graph_dir_path", graph_dir_path)
+        for file_name in os.listdir(graph_dir_path):
+            abs_file_name = os.path.join(graph_dir_path, file_name)
+            if os.path.isfile(abs_file_name):
+                file_num += 1
+            else:
+                print(file_name)
+
+        print("file_num", file_num)
+        return file_num
+
+        # return len(self.m_uid_list)
 
     def add_feature_node(self, G, uid, iid, sid_list):
         fid2nid = {}
@@ -610,27 +661,39 @@ class RATEBEER(Dataset):
             idx = idx.tolist()
         
         i = idx
+        g_file_i = self.m_graph_dir_path+str(i)+".bin"
+
+        g_i, label_i = load_graphs(g_file_i)
+
+        g_i = g_i[0]
+        
 
         # file_i = str(i)+"_graph.json"
         # graph_name = os.path.join(self.m_dir_path, file_i)
-        uid_i = self.m_uid_list[i]
-        iid_i = self.m_iid_list[i]
-        cdd_sid_list_i = self.m_cdd_sid_list_list[i]
-        label_sid_list_i = self.m_label_sid_list_list[i]
+        # uid_i = self.m_uid_list[i]
+        # iid_i = self.m_iid_list[i]
+        # cdd_sid_list_i = self.m_cdd_sid_list_list[i]
+        # label_sid_list_i = self.m_label_sid_list_list[i]
 
-        G = self.create_graph(uid_i, iid_i, cdd_sid_list_i, label_sid_list_i)
+        # G = self.create_graph(uid_i, iid_i, cdd_sid_list_i, label_sid_list_i)
 
-        return G, i
+        return g_i, i
 
     def get_example(self, idx):
         i = idx
 
-        uid_i = self.m_uid_list[i]
-        iid_i = self.m_iid_list[i]
-        cdd_sid_list_i = self.m_cdd_sid_list_list[i]
-        label_sid_list_i = self.m_label_sid_list_list[i]
+        # uid_i = self.m_uid_list[i]
+        # iid_i = self.m_iid_list[i]
+        # cdd_sid_list_i = self.m_cdd_sid_list_list[i]
+        # label_sid_list_i = self.m_label_sid_list_list[i]
 
-        example = {"user":uid_i, "item":iid_i, "cdd_sid":cdd_sid_list_i, "label_sid":label_sid_list_i}
+        g_file_i = self.m_graph_dir_path+str(i)+".bin"
+
+        g_i, label_i = load_graphs(g_file_i)
+
+        label_sid_list_i = label_i["gt_label"].numpy()
+
+        example = {"g":g_i, "label_sid":label_sid_list_i}
 
         return example
 

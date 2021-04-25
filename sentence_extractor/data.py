@@ -20,6 +20,43 @@ from ratebeer import RATEBEER
 class DATA():
     def __init__(self):
         print("data")
+
+    def f_load_graph_ratebeer(self, args):
+        self.m_data_name = args.data_name
+
+        graph_dir = args.graph_dir
+        graph_train_dir = graph_dir+"train/"
+
+        train_data = RATEBEER()
+        train_data.load_train_graph_data(graph_train_dir)
+
+        graph_test_dir = graph_dir+"valid/"
+        valid_data = RATEBEER()
+        valid_data.load_eval_graph_data(graph_test_dir)
+
+        vocab_file = graph_dir+"vocab.pickle"
+        vocab = None
+        with open(vocab_file, "rb") as f:
+            vocab = pickle.load(f)
+
+        vocab_obj = vocab["vocab"]
+        print("user num", len(vocab_obj.m_user2uid))
+
+        # vocab_file = graph_dir+"vocab.pickle"
+        # vocab = {"vocab": vocab_obj}
+        # with open(vocab_file, "wb") as f:
+        #     pickle.dump(vocab, f)
+
+        # exit()
+
+        batch_size = args.batch_size
+
+        train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=graph_collate_fn)
+
+        valid_loader = DataLoader(dataset=valid_data, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=graph_collate_fn)
+
+        return train_loader, valid_loader, vocab_obj
+
     
     def f_load_ratebeer(self, args):
         self.m_data_name = args.data_name
@@ -34,15 +71,34 @@ class DATA():
         item_feature_file = args.data_dir+"train/item2feature.json"
 
         sent_feature_file = args.data_dir+"train/sentence2feature.json"
-        
+
+        graph_dir = args.graph_dir
+        graph_train_dir = graph_dir+"train/"
+
         train_data = RATEBEER()
-        vocab_obj = train_data.load_train_data(sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sen_file, user_feature_file, item_feature_file, sent_feature_file)
+        vocab_obj = train_data.load_train_data(sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sen_file, user_feature_file, item_feature_file, sent_feature_file, graph_train_dir)
 
         sent_content_file = args.data_dir+"valid/id2sentence_test.json"
         useritem_candidate_label_sen_file = args.data_dir+"valid/useritem2sentids_test.json"
         
+        graph_test_dir = graph_dir+"valid/"
         valid_data = RATEBEER()
-        valid_data.load_eval_data(vocab_obj, train_data.m_uid2fid2tfidf_dict, train_data.m_iid2fid2tfidf_dict, train_data.m_sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sen_file)
+        valid_data.load_eval_data(vocab_obj, train_data.m_uid2fid2tfidf_dict, train_data.m_iid2fid2tfidf_dict, train_data.m_sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sen_file, graph_test_dir)
+
+        # vocab_file = args.data_dir+"vocab.pickle"
+
+        # vocab = None
+        # with open(vocab_file, "rb") as f:
+        #     vocab = pickle.load(f)
+
+        # print("user num", len(vocab["vocab"].m_user2uid))
+
+        vocab_file = graph_dir+"vocab.pickle"
+        vocab = {"vocab": vocab_obj}
+        with open(vocab_file, "wb") as f:
+            pickle.dump(vocab, f)
+
+        exit()
 
         batch_size = args.batch_size
 

@@ -41,7 +41,8 @@ def main(args):
     data_obj = DATA()
 
     if "beer" in args.data_name:
-        train_data, valid_data, vocab_obj = data_obj.f_load_ratebeer(args)
+        train_data, valid_data, vocab_obj = data_obj.f_load_graph_ratebeer(args)
+        # train_data, valid_data, vocab_obj = data_obj.f_load_ratebeer(args)
 
     if args.train:
         now_time = datetime.now()
@@ -100,7 +101,8 @@ if __name__ == "__main__":
     parser.add_argument('--data_dir', type=str, default='data')
     parser.add_argument('--data_name', type=str, default='ratebeer')
     parser.add_argument('--data_file', type=str, default='data.pickle')
-    
+    parser.add_argument('--graph_dir', type=str, default='../output_graph/')
+
     parser.add_argument('--vocab_file', type=str, default='vocab.json')
     parser.add_argument('--model_file', type=str, default="model_best.pt")
     parser.add_argument('--model_name', type=str, default="graph_sentence_extractor")
