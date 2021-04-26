@@ -1,6 +1,7 @@
 import os
 import io
 import json
+from dgl.convert import graph
 import torch
 import numpy as np
 import random
@@ -73,17 +74,30 @@ class DATA():
         sent_feature_file = args.data_dir+"train/sentence2feature.json"
 
         graph_dir = args.graph_dir
+        if not os.path.exists(graph_dir):
+            os.makedirs(graph_dir)
+
         graph_train_dir = graph_dir+"train/"
+        if not os.path.exists(graph_train_dir):
+            os.makedirs(graph_train_dir)
 
         train_data = RATEBEER()
         vocab_obj = train_data.load_train_data(sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sen_file, user_feature_file, item_feature_file, sent_feature_file, graph_train_dir)
 
-        sent_content_file = args.data_dir+"valid/id2sentence_test.json"
+        sent_content_file = args.data_dir+"valid/id2sentence.json"
         useritem_candidate_label_sen_file = args.data_dir+"valid/useritem2sentids_test.json"
         
         graph_test_dir = graph_dir+"valid/"
+        if not os.path.exists(graph_test_dir):
+            os.makedirs(graph_test_dir)
+
         valid_data = RATEBEER()
         valid_data.load_eval_data(vocab_obj, train_data.m_uid2fid2tfidf_dict, train_data.m_iid2fid2tfidf_dict, train_data.m_sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sen_file, graph_test_dir)
+
+        vocab_file = graph_dir+"vocab.pickle"
+        vocab = {"vocab": vocab_obj}
+        with open(vocab_file, "wb") as f:
+            pickle.dump(vocab, f)
 
         # vocab_file = args.data_dir+"vocab.pickle"
 
@@ -93,11 +107,7 @@ class DATA():
 
         # print("user num", len(vocab["vocab"].m_user2uid))
 
-        vocab_file = graph_dir+"vocab.pickle"
-        vocab = {"vocab": vocab_obj}
-        with open(vocab_file, "wb") as f:
-            pickle.dump(vocab, f)
-
+       
         exit()
 
         batch_size = args.batch_size

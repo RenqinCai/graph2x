@@ -392,37 +392,54 @@ class RATEBEER(Dataset):
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     cdd_sid_list_i.append(sid_ijk)
 
-                label_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][1]
-                label_sid_list_i = []
+                if test_flag:
 
-                for sentid_ijk in label_sentid_list_ij:
-                    
-                    if test_flag:
+                    label_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][1]
+                    label_sid_list_i = []
+
+                    for sentid_ijk in label_sentid_list_ij:
                         sentid_ijk = train_sent_num+int(sentid_ijk)
                         sentid_ijk = str(sentid_ijk)
 
-                    if sentid_ijk not in sent2sid_dict:
-                        print("error missing label sent", sentid_ijk)
-                        continue
-                    
+                        if sentid_ijk not in sent2sid_dict:
+                            print("error missing label sent", sentid_ijk)
+                            continue
+                        
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     label_sid_list_i.append(sid_ijk)
 
-                if len(label_sid_list_i) == 0:
-                    exit()
-                    continue
+                    if len(label_sid_list_i) == 0:
+                        exit()
+                        continue
+                else:
+                    label_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][1]
+                    label_sid_list_i = []
+
+                    for sentid_ijk in label_sentid_list_ij:
+                       
+                        if sentid_ijk not in sent2sid_dict:
+                            print("error missing label sent", sentid_ijk)
+                            continue
+                        
+                    sid_ijk = sent2sid_dict[sentid_ijk]
+                    label_sid_list_i.append(sid_ijk)
+
+                    if len(label_sid_list_i) == 0:
+                        exit()
+                        continue
+
                 # uid_i = user2uid_dict[userid_i]
                 # iid_i = item2iid_dict[itemid_ij]
                 
                 uid_list.append(uid_i)
                 iid_list.append(iid_ij)
                 cdd_sid_list_list.append(cdd_sid_list_i)
-                label_sid_list_list.append(label_sid_list_i)
+                label_sid_list_list.append(label_sid_list_i)  
 
         self.m_uid_list = uid_list
         self.m_iid_list = iid_list
         self.m_cdd_sid_list_list = cdd_sid_list_list
-        self.m_label_sid_list_list = label_sid_list_list        
+        self.m_label_sid_list_list = label_sid_list_list
 
     def load_train_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file, output_dir):
 
@@ -480,10 +497,15 @@ class RATEBEER(Dataset):
         self.m_dir_path = output_dir
 
         graph_num = len(self.m_uid_list)
-        # graph_num = 100
+        graph_summary_file = "graph_summary.txt"
+        graph_summary_file = os.path.join(self.m_dir_path, graph_summary_file)
+
+        with open(graph_summary_file, "w") as f:
+            f.write(str(graph_num))
+        # graph_num = 10
         for graph_idx in range(graph_num):
 
-            if graph_idx % 1e5 == 0:
+            if graph_idx % 2e4 == 0:
                 print("graph idx", graph_idx)
 
             i = graph_idx
@@ -505,13 +527,21 @@ class RATEBEER(Dataset):
 
         file_num = 0
 
-        print("graph_dir_path", graph_dir_path)
-        for file_name in os.listdir(graph_dir_path):
-            abs_file_name = os.path.join(graph_dir_path, file_name)
-            if os.path.isfile(abs_file_name):
-                file_num += 1
-            else:
-                print(file_name)
+        graph_summary_file = "graph_summary.txt"
+        graph_summary_file = os.path.join(graph_dir_path, graph_summary_file)
+
+        with open(graph_summary_file, "r") as f:
+            line_val = f.readline()
+            file_num = line_val.strip()
+            file_num = int(file_num)
+
+        # print("graph_dir_path", graph_dir_path)
+        # for file_name in os.listdir(graph_dir_path):
+        #     abs_file_name = os.path.join(graph_dir_path, file_name)
+        #     if os.path.isfile(abs_file_name):
+        #         file_num += 1
+        #     else:
+        #         print(file_name)
 
         print("file_num", file_num)
         return file_num
@@ -650,8 +680,8 @@ class RATEBEER(Dataset):
             label[np.array(labelid_list)] = 1
 
         label_tensor = torch.LongTensor(label).unsqueeze(1)
-        # print("label_tensor", label_tensor)
         
+        # G.nodes[list(nid2sid.keys())].data["gt_label"] = gt_label_tensor
         G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
 
         return G
