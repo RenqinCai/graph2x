@@ -42,8 +42,9 @@ def main(args):
 
     s_time = datetime.now()
     if "beer" in args.data_name:
-        # train_data, valid_data, vocab_obj = data_obj.f_load_graph_ratebeer(args)
-        train_data, valid_data, vocab_obj = data_obj.f_load_ratebeer(args)
+        train_data, valid_data, vocab_obj = data_obj.f_load_graph_ratebeer(args)
+        # train_data, valid_data, vocab_obj = data_obj.f_load_ratebeer(args)
+    
     e_time = datetime.now()
     print("... save data duration ... ", e_time-s_time)
 

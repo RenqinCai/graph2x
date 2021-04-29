@@ -163,34 +163,21 @@ class TRAINER(object):
         start_time = time.time()
 
         network.train()
-        # train_data.dataset.f_neg_sample()
 
         for i, (G, index) in enumerate(train_data):
-            # iter_start_time = time.time()
             G = G.to(self.m_device)
-            
-            # iter_end_time = time.time()
-            # print("... duration 0 ... ", iter_end_time-iter_start_time)
 
             logits = network(G)
-
-            # iter_end_time = time.time()
-            # print("... duration 1 ... ", iter_end_time-iter_start_time)
 
             snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
             labels = G.ndata["label"][snode_id]
 
-            one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
-            # print(one_hot_labels)
-            node_loss = self.m_criterion(logits, one_hot_labels)
-            # print("node_loss", node_loss.size())
-
+            labels = labels.float()
+            node_loss = self.m_criterion(logits, labels)
+            
             G.nodes[snode_id].data["loss"] = node_loss
             loss = dgl.sum_nodes(G, "loss")
             loss = loss.mean()
-
-            # iter_end_time = time.time()
-            # print("... duration 2 ... ", iter_end_time-iter_start_time)
 
             loss_list.append(loss.item()) 
             
@@ -213,9 +200,6 @@ class TRAINER(object):
 
                 tmp_loss_list = []
 
-            # iter_end_time = time.time()
-            # print("... duration 3... ", iter_end_time-iter_start_time)
-                           
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_train_iteration, np.mean(loss_list)))
         logger_obj.f_add_scalar2tensorboard("train/loss", np.mean(loss_list), self.m_train_iteration)
 
@@ -270,14 +254,12 @@ class TRAINER(object):
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
 
-                # end_time = time.time()
-                # duration = end_time - start_time
-                # print("... one batch 0", duration)
+                # one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
 
-                one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
+                # node_loss = self.m_criterion(logits, one_hot_labels)
 
-                node_loss = self.m_criterion(logits, one_hot_labels)
-                # print("node_loss", node_loss.size())
+                labels = labels.float()
+                node_loss = self.m_criterion(logits, labels)
 
                 G.nodes[snode_id].data["loss"] = node_loss
                 loss = dgl.sum_nodes(G, "loss")
@@ -299,10 +281,15 @@ class TRAINER(object):
                     snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
                     N = len(snode_id_j)
                     p_sent_j = g_j.ndata["p"][snode_id_j]
-                    p_sent_j = p_sent_j.view(-1, 2)
+                    p_sent_j = p_sent_j.view(-1)
+                    # p_sent_j = p_sent_j.view(-1, 2)
 
-                    topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
-                    pred_idx_j = pred_idx_j.cpu().numpy()
+                    # topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
+                    topk_j, pred_idx_j = torch.topk(p_sent_j, min(topk, N))
+                    pred_snode_id_j = snode_id_j[pred_idx_j]
+
+                    pred_sid_list_j = g_j.nodes[pred_snode_id_j].data["raw_id"]
+                    pred_logits_list_j =  g_j.nodes[pred_snode_id_j].data["p"]
 
                     # recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
 
@@ -310,10 +297,10 @@ class TRAINER(object):
                     # precision_list.append(precision_j)
 
                     for sid_k in label_sid_list_j:
-                        hyps_j.append(self.m_sid2swords[sid_k])
-
-                    for sid_k in pred_idx_j:
                         refs_j.append(self.m_sid2swords[sid_k])
+
+                    for sid_k in pred_sid_list_j:
+                        hyps_j.append(self.m_sid2swords[sid_k.item()])
 
                     hyps_j = " ".join(hyps_j)
                     refs_j = " ".join(refs_j)
@@ -365,8 +352,6 @@ class TRAINER(object):
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
         logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
         logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
-
-        # logger_obj.f_add_output2IO("%d, NLL_loss:%.4f, recall@%d:%.4f, precision@%d:%.4f, rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss, topk, self.m_mean_eval_recall, self.m_mean_eval_precision, self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
 
         network.train()
 
