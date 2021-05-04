@@ -37,6 +37,10 @@ class PositionwiseFeedForward(nn.Module):
         self.layer_norm = nn.LayerNorm(d_in)
         self.dropout = nn.Dropout(dropout)
 
+    def reset_parameters(self):
+        weight_range = 1e-3
+        nn.init.xavier_normal_(self.w_1.weight, gain=weight_range)
+
     def forward(self, x):
         assert not torch.any(torch.isnan(x)), "FFN input"
         residual = x
@@ -195,6 +199,13 @@ class GATLayer(nn.Module):
 
         # self.feat_fc = nn.Linear(feat_embed_size, out_dim)
         self.attn_fc = nn.Linear(2 * out_dim, 1, bias=False)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        gain = nn.init.calculate_gain("relu")
+        nn.init.xavier_normal_(self.fc.weight, gain=gain)
+        nn.init.xavier_normal_(self.attn_fc.weight, gain=gain)
 
     def edge_attention(self, edges):
         # start_time = time.time()

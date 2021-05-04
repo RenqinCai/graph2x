@@ -6,7 +6,6 @@ import torch.nn.functional as F
 
 from GATStackLayer import MultiHeadLayer, WSGATLayer, SWGATLayer, PositionwiseFeedForward, GATLayer
 
-
 class WSWGAT(nn.Module):
     def __init__(self, in_dim, out_dim, head_num, attn_drop_out, ffn_inner_hidden_size, ffn_drop_out, layer_type):
         super().__init__()

@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 # from movie_iter import MOVIE_LOADER, MOVIE_TEST
 
 from ratebeer import RATEBEER
+from ratebeer_process import Vocab
 
 class DATA():
     def __init__(self):

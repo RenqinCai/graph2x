@@ -225,6 +225,7 @@ class RATEBEER(Dataset):
                 else:
                     print(file_name)
 
+        # file_num = 1000
         print("file_num", file_num)
         return file_num
     

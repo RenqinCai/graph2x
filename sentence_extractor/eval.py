@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu
 from rouge import Rouge
 import dgl
 
@@ -80,7 +80,8 @@ class EVAL(object):
                 # eval_flag = random.randint(1,5)
                 # if eval_flag != 2:
                 # 	continue
-                print("... eval ", i)
+                if i % 100 == 0:
+                    print("... eval ", i)
 
                 # debug_index += 1
                 # if debug_index > 1:
@@ -92,6 +93,7 @@ class EVAL(object):
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
 
+                labels = labels.float()
                 node_loss = self.m_criterion(logits, labels)
                 # print("node_loss", node_loss.size())
 
@@ -115,6 +117,8 @@ class EVAL(object):
                     snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
                     N = len(snode_id_j)
                     p_sent_j = g_j.ndata["p"][snode_id_j]
+                    
+                    p_sent_j = p_sent_j.view(-1)
                     p_sent_j = F.sigmoid(p_sent_j)
 
                     topk_j, pred_idx_j = torch.topk(p_sent_j, min(topk, N))
@@ -133,7 +137,8 @@ class EVAL(object):
 
                     inode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==3)
                     iid_j = g_j.nodes[inode_id_j].data["raw_id"]
-                    # recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
+                    
+                    recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
 
                     # recall_list.append(recall_j)
                     # precision_list.append(precision_j)
@@ -173,8 +178,23 @@ class EVAL(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_scores_j = compute_bleu([refs_j], [hyps_j])
                     bleu_list.append(bleu_scores_j)
+
+
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+
+                    # bleu_1_scores_j = compute_bleu_order([refs_j], [hyps_j], order=1)
+                    bleu_1_list.append(bleu_1_scores_j)
+
+                    # bleu_2_scores_j = compute_bleu_order([refs_j], [hyps_j], order=2)
+                    bleu_2_list.append(bleu_2_scores_j)
+
+                    # bleu_3_scores_j = compute_bleu_order([refs_j], [hyps_j], order=3)
+                    bleu_3_list.append(bleu_3_scores_j)
+
+                    # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
+                    bleu_4_list.append(bleu_4_scores_j)
 
         self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
         self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
@@ -189,8 +209,16 @@ class EVAL(object):
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
         self.m_mean_eval_bleu = np.mean(bleu_list)
+        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
+        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
+        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
+        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
         # print("NLL_loss:%.4f"%(self.m_mean_eval_loss))
         print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
         print("bleu:%.4f"%(self.m_mean_eval_bleu))
+        print("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
+        print("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
+        print("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
+        print("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 

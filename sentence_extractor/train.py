@@ -165,6 +165,9 @@ class TRAINER(object):
         network.train()
 
         for i, (G, index) in enumerate(train_data):
+            if i % 10 == 0:
+                print("... eval ... ", i)
+
             G = G.to(self.m_device)
 
             logits = network(G)
@@ -186,16 +189,17 @@ class TRAINER(object):
             optimizer.zero_grad()
             loss.backward()
             
-            if self.m_grad_clip:
-                max_norm = 5.0
-                torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm)
+            # if self.m_grad_clip:
+            #     max_norm = 5.0
+            #     torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm)
             
             optimizer.step()
 
             self.m_train_iteration += 1
             
             iteration += 1
-            if iteration % self.m_print_interval == 0:
+            # if iteration % self.m_print_interval == 0:
+            if iteration % 5 == 0:
                 logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(iteration, np.mean(tmp_loss_list)))
 
                 tmp_loss_list = []
