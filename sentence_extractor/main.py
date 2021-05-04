@@ -17,12 +17,14 @@ from train import TRAINER
 from model import GraphX
 from eval import EVAL
 
+
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
 
 def main(args):
     ts = time.strftime('%Y-%b-%d-%H:%M:%S', time.gmtime())
@@ -55,11 +57,11 @@ def main(args):
 
         args.model_file = model_file+"/model_best_"+time_name+".pt"
         print("model_file", model_file)
-    
+
     # print("vocab_size", vocab_obj.vocab_size)
     print("user num", vocab_obj.user_num)
     print("item num", vocab_obj.item_num)
-    
+
     network = GraphX(args, vocab_obj, device)
 
     total_param_num = 0

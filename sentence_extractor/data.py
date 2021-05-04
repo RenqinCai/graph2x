@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 
 from ratebeer import RATEBEER
 
+
 class DATA():
     def __init__(self):
         print("data")
@@ -57,7 +58,6 @@ class DATA():
 
         return train_loader, valid_loader, vocab_obj
 
-    
     def f_load_ratebeer(self, args):
         self.m_data_name = args.data_name
 
@@ -111,11 +111,13 @@ class DATA():
 
 import dgl
 
+
 def graph_collate_fn(samples):
+    # ?
     graphs, index = map(list, zip(*samples))
     graph_len = [len(g.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)) for g in graphs]
     sorted_len, sorted_index = torch.sort(torch.LongTensor(graph_len), dim=0, descending=True)
     batched_graph = dgl.batch([graphs[idx] for idx in sorted_index])
     batched_index = [index[idx] for idx in sorted_index]
 
-    return batched_graph, batched_index    
+    return batched_graph, batched_index

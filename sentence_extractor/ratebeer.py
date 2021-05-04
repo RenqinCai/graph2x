@@ -6,11 +6,15 @@ from torch.utils.data import Dataset
 import pandas as pd
 import argparse
 import copy
-from collections import Counter 
+from collections import Counter
 import dgl
 from dgl.data.utils import save_graphs, load_graphs
 
+
 def readJson(fname):
+    """
+    read json file which contains multiple lines of data
+    """
     data = []
     line_num = 0
     with open(fname, encoding="utf-8") as f:
@@ -23,27 +27,29 @@ def readJson(fname):
                 print("error", line_num)
     return data
 
+
 class Vocab():
     def __init__(self):
-
+        # mapping user/item to id
         self.m_user2uid = {}
         self.m_item2iid = {}
-
+        # number of user/item
         self.m_user_num = 0
         self.m_item_num = 0
-
+        # mapping feature to id
         self.m_feature2fid = {}
         self.m_feature_num = 0
-
+        # mapping sentence to id
         self.m_sent2sid = {}
         self.m_sent_num = 0
-
+        # mapping feature id to feature embedding
         self.m_fid2fembed = {}
+        # mapping sentence id to sentence embedding
         self.m_sid2sembed = {}
-
+        # count number of sentence on train/test set
         self.m_train_sent_num = 0
         self.m_test_sent_num = 0
-        
+
     def f_set_user2uid_vocab(self, user2uid):
         self.m_user2uid = user2uid
         self.m_user_num = len(self.m_user2uid)
@@ -63,15 +69,17 @@ class Vocab():
     def f_load_sent_content_train(self, sent_content_file):
 
         self.m_sid2swords = {}
-
+        # Load the id2sentence mapping which contains the sentence content
         sent_content = readJson(sent_content_file)[0]
-
+        # keys of sent_content are sentence_ids
         sentid_list = list(sent_content.keys())
-
+        # number of sentence is the len of the sentence_ids list
         sent_num = len(sent_content)
         for sent_idx in range(sent_num):
+            # get current sentence id
             sentid_i = sentid_list[sent_idx]
-
+            # Construct the mapping between sentence id and its relative order in the sentid_list
+            # so that the trainset sentence ids can be combined with testset sentence ids
             if sentid_i not in self.m_sent2sid:
                 sid_i = len(self.m_sent2sid)
                 self.m_sent2sid[sentid_i] = sid_i
@@ -85,10 +93,11 @@ class Vocab():
         print("load sent num train", len(self.m_sid2swords))
 
     def f_load_sent_content_eval(self, sent_content_file):
+        # Load id2sentence (eval) mapping which contains the sentence content
         sent_content = readJson(sent_content_file)[0]
-
+        # Get sentence id (eval)
         sentid_list = list(sent_content.keys())
-
+        # m_sent2sid is already being feeded by the sentence id on train set
         train_sent_num = len(self.m_sent2sid)
         self.m_train_sent_num = train_sent_num
         print("train_sent_num", train_sent_num)
@@ -96,7 +105,7 @@ class Vocab():
         for sent_idx in range(sent_num):
             sentid_i = sentid_list[sent_idx]
             sentwords_i = sent_content[sentid_i]
-
+            # add number of train sentence to sentid_i (eval)
             sentid_i = train_sent_num+int(sentid_i)
             sentid_i = str(sentid_i)
 
@@ -105,12 +114,12 @@ class Vocab():
                 self.m_sent2sid[sentid_i] = sid_i
 
             sid_i = self.m_sent2sid[sentid_i]
-            
+
             self.m_sid2swords[sid_i] = sentwords_i
 
         print("load sent num eval", sent_num)
         print("total sent num", len(self.m_sent2sid))
-    
+
     def f_load_sent_embed(self, sent_embed_file):
         ### sid 2 embed
         sent2sid_dict = self.m_sent2sid
@@ -129,11 +138,11 @@ class Vocab():
             if sentid_i not in sent2sid_dict:
                 print("error missing sent", sentid_i)
                 continue
-            
+
             sid_i = sent2sid_dict[sentid_i]
             if sid_i not in self.m_sid2sembed:
                 self.m_sid2sembed[sid_i] = sentembed_i
-    
+
     def f_load_feature_embed(self, feature_embed_file):
         self.m_feature2fid = {}
         self.m_fid2fembed = {}
@@ -145,20 +154,20 @@ class Vocab():
         featureid_list = list(feature_embed.keys())
         for featureid_i in featureid_list:
             featureembed_i = feature_embed[featureid_i]
-            
+
             if featureid_i not in self.m_feature2fid:
                 fid_i = len(self.m_feature2fid)
                 self.m_feature2fid[featureid_i] = fid_i
 
             fid_i = self.m_feature2fid[featureid_i]
             if fid_i not in self.m_fid2fembed:
-                self.m_fid2fembed[fid_i] = featureembed_i        
+                self.m_fid2fembed[fid_i] = featureembed_i
 
     @property
     def user_num(self):
         self.m_user_num = len(self.m_user2uid)
         return self.m_user_num
-    
+
     @property
     def item_num(self):
         self.m_item_num = len(self.m_item2iid)
@@ -177,12 +186,13 @@ class Vocab():
     @property
     def train_sent_num(self):
         return self.m_train_sent_num
-        
+
 
 class RATEBEER(Dataset):
     def __init__(self):
         super().__init__()
-
+        # user-feature | item-feature | sentence-feature
+        # edges and the tf-idf weight
         self.m_uid2fid2tfidf_dict = {}
         self.m_iid2fid2tfidf_dict = {}
         self.m_sid2fid2tfidf_dict = {}
@@ -203,7 +213,7 @@ class RATEBEER(Dataset):
     def load_user_feature(self, vocab, user_feature_file):
         ### user_feature {userid: {featureid: feature tf-idf}}
         uid2fid2tfidf_dict = {}
-
+        # read from file user2feature.json
         userid2fid2tfidf = readJson(user_feature_file)[0]
         user_num = len(userid2fid2tfidf)
 
@@ -272,21 +282,21 @@ class RATEBEER(Dataset):
                 iid2fid2tfidf_dict[iid_i] = {}
 
             for feautreid_ij in featureid_tfidf_dict_i:
-                
+
                 if feautreid_ij not in feature2fid_dict:
                     fid_ij = len(feature2fid_dict)
                     feature2fid_dict[feautreid_ij] = fid_ij
-                
+
                 fid_ij = feature2fid_dict[feautreid_ij]
                 tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
-                
+
                 iid2fid2tfidf_dict[iid_i][fid_ij] = tfidf_ij
 
         self.m_iid2fid2tfidf_dict = iid2fid2tfidf_dict
 
         vocab.f_set_item2iid_vocab(item2iid_dict)
         vocab.f_set_feature2fid_vocab(feature2fid_dict)
-    
+
     def load_sent_feature(self, vocab, sent_feature_file):
         ### sent_feature {sentid: {featureid: feature tf-idf}}
         sid2fid2tfidf_dict = {}
@@ -328,13 +338,13 @@ class RATEBEER(Dataset):
 
                 fid_ij = feature2fid_dict[feautreid_ij]
                 tfidf_ij = featureid_tfidf_dict_i[feautreid_ij]
-                
+
                 sid2fid2tfidf_dict[sid_i][fid_ij] = tfidf_ij
 
         self.m_sid2fid2tfidf_dict = sid2fid2tfidf_dict
 
     def load_useritem_cdd_label_sent(self, vocab, useritem_candidate_label_sent_file, test_flag=False):
-        #### read pair data 
+        #### read pair data
 
         user2uid_dict = vocab.m_user2uid
         item2iid_dict = vocab.m_item2iid
@@ -377,14 +387,14 @@ class RATEBEER(Dataset):
                 if itemid_ij not in item2iid_dict:
                     print("error missing item", itemid_ij)
                     continue
-                
+
                 iid_ij = item2iid_dict[itemid_ij]
 
                 cdd_sid_list_i = []
                 for sentid_ijk in cdd_sentid_list_ij:
                     # if len(sentid_ijk) == 0:
                     #     continue
-                        
+
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing cdd sent", sentid_ijk)
                         continue
@@ -396,7 +406,7 @@ class RATEBEER(Dataset):
                 label_sid_list_i = []
 
                 for sentid_ijk in label_sentid_list_ij:
-                    
+
                     if test_flag:
                         sentid_ijk = train_sent_num+int(sentid_ijk)
                         sentid_ijk = str(sentid_ijk)
@@ -404,7 +414,7 @@ class RATEBEER(Dataset):
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing label sent", sentid_ijk)
                         continue
-                    
+
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     label_sid_list_i.append(sid_ijk)
 
@@ -413,7 +423,7 @@ class RATEBEER(Dataset):
                     continue
                 # uid_i = user2uid_dict[userid_i]
                 # iid_i = item2iid_dict[itemid_ij]
-                
+
                 uid_list.append(uid_i)
                 iid_list.append(iid_ij)
                 cdd_sid_list_list.append(cdd_sid_list_i)
@@ -422,42 +432,47 @@ class RATEBEER(Dataset):
         self.m_uid_list = uid_list
         self.m_iid_list = iid_list
         self.m_cdd_sid_list_list = cdd_sid_list_list
-        self.m_label_sid_list_list = label_sid_list_list        
+        self.m_label_sid_list_list = label_sid_list_list
 
     def load_train_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file, output_dir):
 
         """load vocab"""
         vocab_obj = Vocab()
         print("... load sentence content ...")
-
+        # load sentence content from id2sentence
         vocab_obj.f_load_sent_content_train(sent_content_file)
-
+        # load sentence embedding from sid2sentembed
         print("... load sentence embed ...")
         vocab_obj.f_load_sent_embed(sent_embed_file)
-
+        # load feature embedding
         print("... load feature embed ...")
         vocab_obj.f_load_feature_embed(feature_embed_file)
 
         """load feature"""
         print("... load user feature ...")
+        # load user feature (i.e. tf-idf weights) from user2feature
         self.load_user_feature(vocab_obj, user_feature_file)
 
         print("... load item feature ...")
+        # load item feature (i.e. tf-idf weights) from item2feature
         self.load_item_feature(vocab_obj, item_feature_file)
 
         print("... load sentence feature ...")
+        # load sentence feature (i.e. tf-idf weights) from sentence2feature
         self.load_sent_feature(vocab_obj, sent_feature_file)
 
+        # load train data from useritem2sentids
         self.load_useritem_cdd_label_sent(vocab_obj, useritem_candidate_label_sent_file)
 
         print("... load train data ...", len(self.m_uid_list), len(self.m_iid_list), len(self.m_cdd_sid_list_list))
 
+        # save constructed graph
         self.f_save_graphs(output_dir)
 
         return vocab_obj
 
     def load_train_graph_data(self, graph_dir):
-        self.m_graph_dir_path = graph_dir        
+        self.m_graph_dir_path = graph_dir
 
     def load_eval_data(self, vocab, uid2fid2tfidf_dict, iid2fid2tfidf_dict, sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sent_file, output_dir):
         vocab.f_load_sent_content_eval(sent_content_file)
@@ -474,11 +489,11 @@ class RATEBEER(Dataset):
         self.f_save_graphs(output_dir)
 
     def load_eval_graph_data(self, graph_dir):
-        self.m_graph_dir_path = graph_dir        
+        self.m_graph_dir_path = graph_dir
 
     def f_save_graphs(self, output_dir):
         self.m_dir_path = output_dir
-
+        # graph_num is equal to number of user-item pair
         graph_num = len(self.m_uid_list)
         # graph_num = 100
         for graph_idx in range(graph_num):
@@ -497,7 +512,7 @@ class RATEBEER(Dataset):
 
             g_file_i = self.m_dir_path+str(i)+".bin"
             save_graphs(g_file_i, [g_i], gt_label_i)
-        
+
         print("finish saving files", graph_num)
 
     def __len__(self):
@@ -519,6 +534,10 @@ class RATEBEER(Dataset):
         # return len(self.m_uid_list)
 
     def add_feature_node(self, G, uid, iid, sid_list):
+        """
+        only add feature that appears in the candidate sentences to construct feature nodes
+        """
+
         fid2nid = {}
         nid2fid = {}
 
@@ -539,8 +558,9 @@ class RATEBEER(Dataset):
         #         nid2fid[nid] = fid
 
         #         nid += 1
-        
+
         for sid in sid_list:
+            # m_sid2fid2tfidf_dict: {sentid: {featureid: feature tf-idf}}
             fid2tfidf_dict_sent = self.m_sid2fid2tfidf_dict[sid]
 
             for fid in fid2tfidf_dict_sent:
@@ -562,11 +582,11 @@ class RATEBEER(Dataset):
 
     def create_graph(self, uid, iid, sid_list, label_list):
         G = dgl.DGLGraph()
-        
+
         ### add feature nodes
         fid2nid, nid2fid = self.add_feature_node(G, uid, iid, sid_list)
         feature_node_num = len(fid2nid)
-        
+
         ### add sent nodes
         sent_node_num = len(sid_list)
         sid2nid = {}
@@ -596,17 +616,17 @@ class RATEBEER(Dataset):
 
         uid2nid = {uid:feat_sent_node_num}
         nid2uid = {feat_sent_node_num:uid}
-    
+
         ### add item noe
         item_node_num = 1
         G.add_nodes(item_node_num)
         G.ndata["unit"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)
         G.ndata["dtype"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)*3
         G.ndata["id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
-        
+
         iid2nid = {iid:feat_sent_node_num+user_node_num}
         nid2iid = {feat_sent_node_num+user_node_num:iid}
-        
+
         ### add edges from sents to features
         for i in range(sent_node_num):
             sid = sid_list[i]
@@ -617,7 +637,7 @@ class RATEBEER(Dataset):
                 tfidf_sent = fid2tfidf_dict_sent[fid]
                 G.add_edge(nid_f, nid_s, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
                 G.add_edge(nid_s, nid_f, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
-    
+
         for i in range(user_node_num):
             nid_u = list(nid2uid.keys())[0]
             fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
@@ -641,7 +661,7 @@ class RATEBEER(Dataset):
                 tfidf_item = fid2tfidf_dict_item[fid]
                 G.add_edge(nid_f, nid_i, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
                 G.add_edge(nid_i, nid_f, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
-        
+
         G.set_e_initializer(dgl.init.zero_initializer)
 
         label = np.zeros(sent_node_num)
@@ -651,22 +671,21 @@ class RATEBEER(Dataset):
 
         label_tensor = torch.LongTensor(label).unsqueeze(1)
         # print("label_tensor", label_tensor)
-        
+
         G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
 
         return G
-    
+
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        
+
         i = idx
         g_file_i = self.m_graph_dir_path+str(i)+".bin"
 
         g_i, label_i = load_graphs(g_file_i)
 
         g_i = g_i[0]
-        
 
         # file_i = str(i)+"_graph.json"
         # graph_name = os.path.join(self.m_dir_path, file_i)
@@ -696,4 +715,3 @@ class RATEBEER(Dataset):
         example = {"g":g_i, "label_sid":label_sid_list_i}
 
         return example
-

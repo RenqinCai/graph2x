@@ -3,10 +3,9 @@ import torch.nn as nn
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 import time
-
 import dgl
+
 
 class MultiHeadLayer(nn.Module):
     def __init__(self, in_dim, out_dim, head_num, attn_drop_out, layer, merge='cat'):
@@ -26,6 +25,7 @@ class MultiHeadLayer(nn.Module):
             # merge using average
             result = torch.mean(torch.stack(head_outs))
         return result
+
 
 class PositionwiseFeedForward(nn.Module):
     ''' A two-feed-forward-layer module '''
@@ -47,6 +47,7 @@ class PositionwiseFeedForward(nn.Module):
         output = self.layer_norm(output + residual)
         assert not torch.any(torch.isnan(output)), "FFN output"
         return output
+
 
 class WSGATLayer(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -93,9 +94,7 @@ class WSGATLayer(nn.Module):
         h = torch.sum(alpha * nodes.mailbox['z'], dim=1)
         return {'sh': h}
 
-
     def forward(self, g, h):
-
         wnode_id = g.filter_nodes(lambda nodes: nodes.data["unit"] == 0)
         snode_id = g.filter_nodes(lambda nodes: nodes.data["unit"] == 1)
         wsedge_id = g.filter_edges(lambda edges: (edges.src["unit"] == 0) & (edges.dst["unit"] == 1))
@@ -107,6 +106,7 @@ class WSGATLayer(nn.Module):
         g.ndata.pop('z')
         h = g.ndata.pop('sh')
         return h[snode_id]
+
 
 class SWGATLayer(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -188,6 +188,7 @@ class SWGATLayer(nn.Module):
         print("... duration 3", duration)
         return h[wnode_id]
 
+
 class GATLayer(nn.Module):
     def __init__(self, in_dim, out_dim):
         super().__init__()
@@ -225,8 +226,6 @@ class GATLayer(nn.Module):
 
     def reduce_func(self, nodes):
         # start_time = time.time()
-        
-
         alpha = F.softmax(nodes.mailbox['e'], dim=1)
 
         # end_time = time.time()
