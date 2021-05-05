@@ -138,7 +138,7 @@ class EVAL(object):
                     inode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==3)
                     iid_j = g_j.nodes[inode_id_j].data["raw_id"]
                     
-                    recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
+                    recall_j, precision_j = get_example_recall_precision(pred_sid_list_j.cpu(), label_sid_list_j, min(topk, N))
 
                     # recall_list.append(recall_j)
                     # precision_list.append(precision_j)
@@ -158,11 +158,13 @@ class EVAL(object):
                     hyps_j = " ".join(hyps_j)
                     refs_j = " ".join(refs_j)
 
-                    # print("==="*10)
-                    # print("user id", uid_j.item())
-                    # print("item id", iid_j.item())
-                    # print("hyps_j", hyps_j)
-                    # print("refs_j", refs_j)
+                    if uid_j.item() == 0:
+                        continue
+                    print("==="*10)
+                    print("user id", uid_j.item())
+                    print("item id", iid_j.item())
+                    print("hyps_j", hyps_j)
+                    print("refs_j", refs_j)
 
                     scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
 
@@ -195,7 +197,8 @@ class EVAL(object):
 
                     # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
                     bleu_4_list.append(bleu_4_scores_j)
-
+                
+                exit()
         self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
         self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
         self.m_mean_eval_rouge_1_p = np.mean(rouge_1_p_list)

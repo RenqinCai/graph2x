@@ -42,7 +42,8 @@ class GraphX(nn.Module):
         self.m_sent_embed_size = args.sent_embed_size
         self.f_load_sent_embedding(vocab_obj.m_sid2sembed)
 
-        self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size)
+        self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size, bias=False)
+        self.feature_state_proj = nn.Linear(args.feature_embed_size, args.hidden_size, bias=False)
         self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
         self.item_state_proj = nn.Linear(args.item_embed_size, args.hidden_size, bias=False)
 
@@ -62,7 +63,6 @@ class GraphX(nn.Module):
     def f_initialize(self):
         nn.init.uniform_(self.m_user_embed.weight, a=-1e-3, b=1e-3)
         nn.init.uniform_(self.m_item_embed.weight, a=-1e-3, b=1e-3)
-
 
     def f_load_feature_embedding(self, pre_feature_embed):
         
@@ -150,7 +150,8 @@ class GraphX(nn.Module):
         
         # user_embed = self.set_unembed(graph)
 
-        graph.nodes[fnode_id].data["init_state"] = f_embed
+        f_init_state = self.feature_state_proj(f_embed)
+        graph.nodes[fnode_id].data["init_state"] = f_init_state
 
         # item_embed = self.set_inembed(graph)
         item_init_state = self.item_state_proj(i_embed)
@@ -196,6 +197,8 @@ class GraphX(nn.Module):
 
         s_state = torch.cat(s_state_list, dim=0)
         logits = self.wh(s_state)
+
+        # print("logits", logits.size())
 
         return logits
 

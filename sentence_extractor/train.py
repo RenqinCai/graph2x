@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from loss import XE_LOSS, BPR_LOSS, SIG_LOSS
-from metric import get_example_recall_precision, compute_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu
 from model import GraphX
 # from infer_new import _INFER
 import random
@@ -59,6 +59,8 @@ class TRAINER(object):
         self.m_valid_iteration = 0
         self.m_eval_iteration = 0
         self.m_print_interval = args.print_interval
+
+        print("print_interval", self.m_print_interval)
         self.m_overfit_epoch_threshold = 3
 
     def f_save_model(self, checkpoint):
@@ -109,6 +111,7 @@ class TRAINER(object):
                 s_time = datetime.datetime.now()
                 # train_data.sampler.set_epoch(epoch)
                 self.f_train_epoch(train_data, network, optimizer, logger_obj)
+                self.f_eval_train_epoch(train_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
 
                 print("epoch duration", e_time-s_time)
@@ -165,8 +168,8 @@ class TRAINER(object):
         network.train()
 
         for i, (G, index) in enumerate(train_data):
-            if i % 10 == 0:
-                print("... eval ... ", i)
+            # if i % self.m_print_interval == 0:
+            #     print("... eval ... ", i)
 
             G = G.to(self.m_device)
 
@@ -198,8 +201,8 @@ class TRAINER(object):
             self.m_train_iteration += 1
             
             iteration += 1
-            # if iteration % self.m_print_interval == 0:
-            if iteration % 5 == 0:
+            if iteration % self.m_print_interval == 0:
+            # if iteration % 5 == 0:
                 logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(iteration, np.mean(tmp_loss_list)))
 
                 tmp_loss_list = []
@@ -210,7 +213,187 @@ class TRAINER(object):
         end_time = time.time()
         print("+++ duration +++", end_time-start_time)
         self.m_mean_train_loss = np.mean(loss_list)
-      
+    
+    def f_eval_train_epoch(self, eval_data, network, optimizer, logger_obj):
+        loss_list = []
+        recall_list = []
+        precision_list = []
+        F1_list = []
+
+        rouge_1_f_list = []
+        rouge_1_p_list = []
+        rouge_1_r_list = []
+
+        rouge_2_f_list = []
+        rouge_2_p_list = []
+        rouge_2_r_list = []
+
+        rouge_l_f_list = []
+        rouge_l_p_list = []
+        rouge_l_r_list = []
+
+        bleu_list = []
+
+        bleu_1_list = []
+        bleu_2_list = []
+        bleu_3_list = []
+        bleu_4_list = []
+
+        self.m_eval_iteration = self.m_train_iteration
+
+        logger_obj.f_add_output2IO(" "*10+" eval for train data"+" "*10)
+
+        rouge = Rouge()
+
+        network.eval()
+        topk = 3
+
+        start_time = time.time()
+
+        with torch.no_grad():
+            for i, (G, index) in enumerate(eval_data):
+                # eval_flag = random.randint(1, 5)
+                # if eval_flag != 2:
+                # 	continue
+              
+                G = G.to(self.m_device)
+
+                logits = network(G)
+                snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
+                labels = G.ndata["label"][snode_id]
+
+                # print("labels", labels.size())
+                # one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
+
+                # node_loss = self.m_criterion(logits, one_hot_labels)
+
+                labels = labels.float()
+                node_loss = self.m_criterion(logits, labels)
+
+                G.nodes[snode_id].data["loss"] = node_loss
+                loss = dgl.sum_nodes(G, "loss")
+                loss = loss.mean()
+
+                G.nodes[snode_id].data["p"] = logits
+                glist = dgl.unbatch(G)
+
+                for j in range(len(glist)):
+                    hyps_j = []
+                    refs_j = []
+
+                    idx = index[j]
+                    example_j = eval_data.dataset.get_example(idx)
+                    
+                    label_sid_list_j = example_j["label_sid"]
+                    gt_sent_num = len(label_sid_list_j)
+                    print("gt_sent_num", gt_sent_num)
+
+                    g_j = glist[j]
+                    snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
+                    N = len(snode_id_j)
+                    p_sent_j = g_j.ndata["p"][snode_id_j]
+                    p_sent_j = p_sent_j.view(-1)
+                    # p_sent_j = p_sent_j.view(-1, 2)
+
+                    # topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
+                    # topk_j, topk_pred_idx_j = torch.topk(p_sent_j, min(topk, N))
+                    topk_j, topk_pred_idx_j = torch.topk(p_sent_j, 20)
+                    topk_pred_snode_id_j = snode_id_j[topk_pred_idx_j]
+
+                    topk_pred_sid_list_j = g_j.nodes[topk_pred_snode_id_j].data["raw_id"]
+                    topk_pred_logits_list_j =  g_j.nodes[topk_pred_snode_id_j].data["p"]
+
+                    # recall_j, precision_j = get_example_recall_precision(pred_sid_list_j.cpu(), label_sid_list_j, min(topk, N))
+
+                    print("topk_j", topk_j)
+                    print("label_sid_list_j", label_sid_list_j)
+                    print("topk_pred_idx_j", topk_pred_sid_list_j)
+
+                    recall_j, precision_j = get_example_recall_precision(topk_pred_sid_list_j.cpu(), label_sid_list_j, gt_sent_num)
+
+                    recall_list.append(recall_j)
+                    precision_list.append(precision_j)
+
+                    for sid_k in label_sid_list_j:
+                        refs_j.append(self.m_sid2swords[sid_k])
+
+                    for sid_k in topk_pred_sid_list_j:
+                        hyps_j.append(self.m_sid2swords[sid_k.item()])
+
+                    hyps_j = " ".join(hyps_j)
+                    refs_j = " ".join(refs_j)
+
+                    scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+
+                    rouge_1_f_list.append(scores_j["rouge-1"]["f"])
+                    rouge_1_r_list.append(scores_j["rouge-1"]["r"])
+                    rouge_1_p_list.append(scores_j["rouge-1"]["p"])
+
+                    rouge_2_f_list.append(scores_j["rouge-2"]["f"])
+                    rouge_2_r_list.append(scores_j["rouge-2"]["r"])
+                    rouge_2_p_list.append(scores_j["rouge-2"]["p"])
+
+                    rouge_l_f_list.append(scores_j["rouge-l"]["f"])
+                    rouge_l_r_list.append(scores_j["rouge-l"]["r"])
+                    rouge_l_p_list.append(scores_j["rouge-l"]["p"])
+
+                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_list.append(bleu_scores_j)
+
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+
+                    bleu_1_list.append(bleu_1_scores_j)
+
+                    bleu_2_list.append(bleu_2_scores_j)
+
+                    bleu_3_list.append(bleu_3_scores_j)
+
+                    bleu_4_list.append(bleu_4_scores_j)
+
+                loss_list.append(loss.item())
+
+            end_time = time.time()
+            duration = end_time - start_time
+            print("... one epoch", duration)
+
+            logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
+            # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
+                
+        self.m_mean_eval_loss = np.mean(loss_list)
+        self.m_mean_eval_recall = np.mean(recall_list)
+        self.m_mean_eval_precision = np.mean(precision_list)
+
+        self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
+        self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
+        self.m_mean_eval_rouge_1_p = np.mean(rouge_1_p_list)
+
+        self.m_mean_eval_rouge_2_f = np.mean(rouge_2_f_list)
+        self.m_mean_eval_rouge_2_r = np.mean(rouge_2_r_list)
+        self.m_mean_eval_rouge_2_p = np.mean(rouge_2_p_list)
+
+        self.m_mean_eval_rouge_l_f = np.mean(rouge_l_f_list)
+        self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
+        self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
+
+        self.m_mean_eval_bleu = np.mean(bleu_list)
+        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
+        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
+        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
+        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
+
+        logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
+        logger_obj.f_add_output2IO("recall@%d:%.4f"%(topk, self.m_mean_eval_recall))
+        logger_obj.f_add_output2IO("precision@%d:%.4f"%(topk, self.m_mean_eval_precision))
+
+        logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
+        logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
+        logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
+        logger_obj.f_add_output2IO("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
+        logger_obj.f_add_output2IO("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
+        logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
+
+        network.train()
+
     def f_eval_epoch(self, eval_data, network, optimizer, logger_obj):
         loss_list = []
         recall_list = []
@@ -230,6 +413,11 @@ class TRAINER(object):
         rouge_l_r_list = []
 
         bleu_list = []
+
+        bleu_1_list = []
+        bleu_2_list = []
+        bleu_3_list = []
+        bleu_4_list = []
 
         self.m_eval_iteration = self.m_train_iteration
 
@@ -258,6 +446,7 @@ class TRAINER(object):
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
 
+                # print("labels", labels.size())
                 # one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
 
                 # node_loss = self.m_criterion(logits, one_hot_labels)
@@ -326,6 +515,16 @@ class TRAINER(object):
                     bleu_scores_j = compute_bleu([hyps_j], [refs_j])
                     bleu_list.append(bleu_scores_j)
 
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+
+                    bleu_1_list.append(bleu_1_scores_j)
+
+                    bleu_2_list.append(bleu_2_scores_j)
+
+                    bleu_3_list.append(bleu_3_scores_j)
+
+                    bleu_4_list.append(bleu_4_scores_j)
+
                 loss_list.append(loss.item())
 
             end_time = time.time()
@@ -352,10 +551,18 @@ class TRAINER(object):
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
         self.m_mean_eval_bleu = np.mean(bleu_list)
+        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
+        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
+        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
+        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
         logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
         logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
+        logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
+        logger_obj.f_add_output2IO("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
+        logger_obj.f_add_output2IO("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
+        logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
         network.train()
 

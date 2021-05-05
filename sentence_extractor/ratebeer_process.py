@@ -258,8 +258,8 @@ class RATEBEER(Dataset):
         G.set_n_initializer(dgl.init.zero_initializer)
         G.ndata["unit"] = torch.zeros(fid_node_num)
         G.ndata["dtype"] = torch.zeros(fid_node_num)
-        G.ndata["id"] = torch.LongTensor(list(nid2fid.values()))
-        G.ndata["raw_id"] = torch.LongTensor(list(fid2nid.values()))
+        G.ndata["id"] = torch.LongTensor(list(nid2fid.keys()))
+        G.ndata["raw_id"] = torch.LongTensor(list(fid2nid.keys()))
 
         return fid2nid, nid2fid
 
@@ -284,8 +284,8 @@ class RATEBEER(Dataset):
         G.add_nodes(sent_node_num)
         G.ndata["unit"][feature_node_num:] = torch.ones(sent_node_num)
         G.ndata["dtype"][feature_node_num:] = torch.ones(sent_node_num)
-        G.ndata["id"][feature_node_num:] = torch.LongTensor(list(nid2sid.values()))
-        G.ndata["raw_id"][feature_node_num:] = torch.LongTensor(list(sid2nid.values()))
+        G.ndata["id"][feature_node_num:] = torch.LongTensor(list(nid2sid.keys()))
+        G.ndata["raw_id"][feature_node_num:] = torch.LongTensor(list(sid2nid.keys()))
 
         feat_sent_node_num = feature_node_num+sent_node_num
 
@@ -639,36 +639,7 @@ class RATEBEER_TRAIN(RATEBEER):
             print("... save graph data for training data ...")
             self.f_save_graphs(output_graph_dir)
 
-        return vocab_obj    
-    
-    # def f_save_graphs(self, output_dir):
-
-    #     graph_num = len(self.m_uid_list)
-    #     graph_summary_file = "graph_summary.txt"
-    #     graph_summary_file = os.path.join(output_dir, graph_summary_file)
-
-    #     with open(graph_summary_file, "w") as f:
-    #         f.write(str(graph_num))
-    #     graph_num = 10
-    #     for graph_idx in range(graph_num):
-
-    #         if graph_idx % 2e4 == 0:
-    #             print("graph idx", graph_idx)
-
-    #         i = graph_idx
-    #         uid_i = self.m_uid_list[i]
-    #         iid_i = self.m_iid_list[i]
-    #         cdd_sid_list_i = self.m_cdd_sid_list_list[i]
-    #         gt_label_sid_list_i = self.m_gt_label_sid_list_list[i]
-
-    #         g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
-
-    #         gt_label_i = {"gt_label": torch.tensor(gt_label_sid_list_i)}
-
-    #         g_file_i = output_dir+str(i)+".bin"
-    #         save_graphs(g_file_i, [g_i], gt_label_i)
-        
-    #     print("... finish saving training %d files ..."%graph_num)
+        return vocab_obj
 
     def f_save_graphs(self, output_dir):
         self.m_output_graph_dir = output_dir

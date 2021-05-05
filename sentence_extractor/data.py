@@ -27,13 +27,13 @@ class DATA():
         self.m_data_name = args.data_name
 
         graph_dir = args.graph_dir
-        graph_train_dir = graph_dir+"train/"
+        graph_train_dir = graph_dir+"train_debug/"
 
         train_data = RATEBEER()
         train_data.load_train_graph_data(graph_train_dir)
 
         if args.train:
-            graph_test_dir = graph_dir+"valid/"
+            graph_test_dir = graph_dir+"valid_debug/"
             valid_data = RATEBEER()
             valid_data.load_eval_graph_data(graph_test_dir)
         else:
