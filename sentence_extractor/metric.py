@@ -8,6 +8,7 @@ from collections import Counter
 import bottleneck as bn
 import collections
 import math
+from nltk.translate import bleu_score
 
 
 def get_example_recall_precision(pred, target, k=1):
@@ -88,3 +89,30 @@ def compute_bleu(references, hypotheses, max_order=4, smooth=False):
     bleu = geo_mean*bp
 
     return bleu
+
+def get_bleu(references, hypotheses, types=[1, 2, 3, 4]):
+    type_weights = [[1.0, 0., 0., 0], 
+                    [0.5, 0.5, 0.0, 0.0],
+                    [1.0/3, 1.0/3, 1.0/3, 0.0],
+                    [0.25, 0.25, 0.25, 0.25]
+                ]
+
+    totals = [0.0] * len(types)
+
+    sf = bleu_score.SmoothingFunction()
+
+    num = 0
+
+    for (reference, hypothesis) in zip(references, hypotheses):
+        
+        for j, t in enumerate(types):
+            weights = type_weights[t-1]
+            totals[j] += bleu_score.sentence_bleu(reference, hypothesis, smoothing_function=sf.method1, weights=weights)
+
+        num += 1.0
+
+    totals = [total/num for total in totals]
+
+    return totals
+
+    

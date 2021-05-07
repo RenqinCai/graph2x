@@ -9,7 +9,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu
 from rouge import Rouge
 import dgl
 
@@ -19,6 +19,10 @@ class EVAL(object):
 
         self.m_batch_size = args.batch_size 
         self.m_mean_loss = 0
+
+        self.m_sid2swords = vocab_obj.m_sid2swords
+
+        self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
         self.m_device = device
         self.m_model_path = args.model_path
@@ -58,10 +62,16 @@ class EVAL(object):
         rouge_l_r_list = []
 
         bleu_list = []
+        bleu_1_list = []
+        bleu_2_list = []
+        bleu_3_list = []
+        bleu_4_list = []
 
         rouge = Rouge()
 
         print('--'*10)
+
+        debug_index = 0
 
         topk = 3
         self.m_network.eval()
@@ -70,17 +80,21 @@ class EVAL(object):
                 # eval_flag = random.randint(1,5)
                 # if eval_flag != 2:
                 # 	continue
-                print("... eval ", i)
+                if i % 100 == 0:
+                    print("... eval ", i)
 
+                # debug_index += 1
+                # if debug_index > 1:
+                #     break
+                    
                 G = G.to(self.m_device)
 
                 logits = self.m_network(G)
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
                 labels = G.ndata["label"][snode_id]
 
-                one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
-
-                node_loss = self.m_criterion(logits, one_hot_labels)
+                labels = labels.float()
+                node_loss = self.m_criterion(logits, labels)
                 # print("node_loss", node_loss.size())
 
                 G.nodes[snode_id].data["loss"] = node_loss
@@ -103,26 +117,52 @@ class EVAL(object):
                     snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
                     N = len(snode_id_j)
                     p_sent_j = g_j.ndata["p"][snode_id_j]
-                    p_sent_j = p_sent_j.view(-1, 2)
+                    
+                    p_sent_j = p_sent_j.view(-1)
+                    p_sent_j = F.sigmoid(p_sent_j)
 
-                    topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
-                    pred_idx_j = pred_idx_j.cpu().numpy()
+                    topk_j, pred_idx_j = torch.topk(p_sent_j, min(topk, N))
+                    pred_snode_id_j = snode_id_j[pred_idx_j]
+                    # print("topk_j", topk_j)
 
-                    # recall_j, precision_j = get_example_recall_precision(pred_idx_j, label_sid_list_j, min(topk, N))
+                    # pred_idx_j = pred_idx_j.cpu().numpy()
+
+                    pred_sid_list_j = g_j.nodes[pred_snode_id_j].data["raw_id"]
+                    pred_logits_list_j =  g_j.nodes[pred_snode_id_j].data["p"]
+
+                    # print("pred_logits_list_j", pred_logits_list_j)
+                    # exit()
+                    unode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==2)
+                    uid_j = g_j.nodes[unode_id_j].data["raw_id"]
+
+                    inode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==3)
+                    iid_j = g_j.nodes[inode_id_j].data["raw_id"]
+                    
+                    recall_j, precision_j = get_example_recall_precision(pred_sid_list_j.cpu(), label_sid_list_j, min(topk, N))
 
                     # recall_list.append(recall_j)
                     # precision_list.append(precision_j)
 
-                    for sid_k in label_sid_list_j:
-                        hyps_j.append(self.m_sid2swords[sid_k])
+                    # for sid_k in label_sid_list_j:
+                    #     hyps_j.append(self.m_sid2swords[sid_k])
 
-                    for sid_k in pred_idx_j:
+                    # for sid_k in pred_sid_list_j:
+                    #     refs_j.append(self.m_sid2swords[sid_k.item()])
+
+                    for sid_k in label_sid_list_j:
                         refs_j.append(self.m_sid2swords[sid_k])
+
+                    for sid_k in pred_sid_list_j:
+                        hyps_j.append(self.m_sid2swords[sid_k.item()])
 
                     hyps_j = " ".join(hyps_j)
                     refs_j = " ".join(refs_j)
 
+                    if uid_j.item() == 0:
+                        continue
                     print("==="*10)
+                    print("user id", uid_j.item())
+                    print("item id", iid_j.item())
                     print("hyps_j", hyps_j)
                     print("refs_j", refs_j)
 
@@ -140,10 +180,25 @@ class EVAL(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_scores_j = compute_bleu([refs_j], [hyps_j])
                     bleu_list.append(bleu_scores_j)
 
+
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+
+                    # bleu_1_scores_j = compute_bleu_order([refs_j], [hyps_j], order=1)
+                    bleu_1_list.append(bleu_1_scores_j)
+
+                    # bleu_2_scores_j = compute_bleu_order([refs_j], [hyps_j], order=2)
+                    bleu_2_list.append(bleu_2_scores_j)
+
+                    # bleu_3_scores_j = compute_bleu_order([refs_j], [hyps_j], order=3)
+                    bleu_3_list.append(bleu_3_scores_j)
+
+                    # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
+                    bleu_4_list.append(bleu_4_scores_j)
                 
+                exit()
         self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
         self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
         self.m_mean_eval_rouge_1_p = np.mean(rouge_1_p_list)
@@ -157,8 +212,16 @@ class EVAL(object):
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
         self.m_mean_eval_bleu = np.mean(bleu_list)
+        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
+        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
+        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
+        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
-        print("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
+        # print("NLL_loss:%.4f"%(self.m_mean_eval_loss))
         print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
         print("bleu:%.4f"%(self.m_mean_eval_bleu))
+        print("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
+        print("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
+        print("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
+        print("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
