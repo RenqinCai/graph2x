@@ -249,10 +249,10 @@ class RATEBEER(Dataset):
 
         unode_id = g_i.filter_nodes(lambda nodes: nodes.data["dtype"] == 2)
 
-        print("feature node num", fnode_id.size())
-        print("sentence node num", snode_id.size())
-        print("item node num", inode_id.size())
-        print("user node num", unode_id.size())
+        # print("feature node num", fnode_id.size())
+        # print("sentence node num", snode_id.size())
+        # print("item node num", inode_id.size())
+        # print("user node num", unode_id.size())
 
         return g_i, i
 

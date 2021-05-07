@@ -7,7 +7,7 @@ import torch.nn.utils.rnn as rnn
 
 import dgl
 
-from GAT import WSWGAT, ALLGAT
+from GAT import ALLGAT
 import time
 
 class GraphX(nn.Module):
@@ -48,8 +48,6 @@ class GraphX(nn.Module):
         self.item_state_proj = nn.Linear(args.item_embed_size, args.hidden_size, bias=False)
 
         self.m_gat = ALLGAT(in_dim=args.hidden_size, out_dim=args.hidden_size, head_num=args.head_num, attn_drop_out=args.attn_dropout_rate, ffn_inner_hidden_size=args.ffn_inner_hidden_size, ffn_drop_out=args.ffn_dropout_rate)
-
-        self.f_initialize()
         ### node classification
         # self.output_hidden_size = args.output_hidden_size
         # self.wh = nn.Linear(self.output_hidden_size * 2, 2)
@@ -58,11 +56,21 @@ class GraphX(nn.Module):
 
         self._n_iter = 2
 
+        self.f_initialize()
+
         self = self.to(self.m_device)
 
     def f_initialize(self):
         nn.init.uniform_(self.m_user_embed.weight, a=-1e-3, b=1e-3)
         nn.init.uniform_(self.m_item_embed.weight, a=-1e-3, b=1e-3)
+
+        nn.init.uniform_(self.sent_state_proj.weight, a=-1e-3, b=1e-3)
+        nn.init.uniform_(self.feature_state_proj.weight, a=-1e-3, b=1e-3)
+        nn.init.uniform_(self.user_state_proj.weight, a=-1e-3, b=1e-3)
+        nn.init.uniform_(self.item_state_proj.weight, a=-1e-3, b=1e-3)
+
+        nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
+
 
     def f_load_feature_embedding(self, pre_feature_embed):
         

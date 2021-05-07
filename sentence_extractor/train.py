@@ -252,9 +252,9 @@ class TRAINER(object):
 
         with torch.no_grad():
             for i, (G, index) in enumerate(eval_data):
-                # eval_flag = random.randint(1, 5)
-                # if eval_flag != 2:
-                # 	continue
+                eval_flag = random.randint(1, 100)
+                if eval_flag != 2:
+                	continue
               
                 G = G.to(self.m_device)
 
@@ -297,7 +297,7 @@ class TRAINER(object):
 
                     # topk_j, pred_idx_j = torch.topk(p_sent_j[:, 1], min(topk, N))
                     # topk_j, topk_pred_idx_j = torch.topk(p_sent_j, min(topk, N))
-                    topk_j, topk_pred_idx_j = torch.topk(p_sent_j, 20)
+                    topk_j, topk_pred_idx_j = torch.topk(p_sent_j, gt_sent_num)
                     topk_pred_snode_id_j = snode_id_j[topk_pred_idx_j]
 
                     topk_pred_sid_list_j = g_j.nodes[topk_pred_snode_id_j].data["raw_id"]
