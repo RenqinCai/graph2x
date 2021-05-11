@@ -111,7 +111,7 @@ class TRAINER(object):
                 s_time = datetime.datetime.now()
                 # train_data.sampler.set_epoch(epoch)
                 self.f_train_epoch(train_data, network, optimizer, logger_obj)
-                self.f_eval_train_epoch(train_data, network, optimizer, logger_obj)
+                # self.f_eval_train_epoch(train_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
 
                 print("epoch duration", e_time-s_time)
@@ -286,7 +286,7 @@ class TRAINER(object):
                     
                     label_sid_list_j = example_j["label_sid"]
                     gt_sent_num = len(label_sid_list_j)
-                    print("gt_sent_num", gt_sent_num)
+                    # print("gt_sent_num", gt_sent_num)
 
                     g_j = glist[j]
                     snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)

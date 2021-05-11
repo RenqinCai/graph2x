@@ -3,7 +3,9 @@ from numpy.core.numeric import indices
 import torch
 from nltk.translate.bleu_score import sentence_bleu
 import os
-
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+# %matplotlib inline
 from torch import nonzero
 import torch.nn.functional as F
 import torch.nn as nn
@@ -21,6 +23,7 @@ class EVAL(object):
         self.m_mean_loss = 0
 
         self.m_sid2swords = vocab_obj.m_sid2swords
+        self.m_item2iid = vocab_obj.m_item2iid
 
         self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
@@ -41,7 +44,36 @@ class EVAL(object):
 
     def f_eval(self, train_data, eval_data):
         print("eval new")
-        self.f_eval_new(train_data, eval_data)
+        self.f_cluster_embedding()
+        # self.f_eval_new(train_data, eval_data)
+
+    def f_cluster_embedding(self):
+        self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
+
+        embeds = self.m_network.m_item_embed.weight.data.cpu().numpy()
+        item_num = len(embeds)
+        labels = [self.m_iid2item[i] for i in range(item_num)]
+
+        tsne_model = TSNE(perplexity=40, n_components=2, init='pca', n_iter=2500, random_state=23)
+        new_values = tsne_model.fit_transform(embeds)
+
+        x = []
+        y = []
+        for value in new_values:
+            x.append(value[0])
+            y.append(value[1])
+            
+        plt.figure(figsize=(16, 16)) 
+        for i in range(len(x)):
+            plt.scatter(x[i],y[i])
+            plt.annotate(labels[i],
+                        xy=(x[i], y[i]),
+                        xytext=(5, 2),
+                        textcoords='offset points',
+                        ha='right',
+                        va='bottom')
+        plt.savefig("item_embed_tsne.png")
+        
 
     def f_eval_new(self, train_data, eval_data):
 
