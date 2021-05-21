@@ -44,8 +44,8 @@ class EVAL(object):
 
     def f_eval(self, train_data, eval_data):
         print("eval new")
-        self.f_cluster_embedding()
-        # self.f_eval_new(train_data, eval_data)
+        # self.f_cluster_embedding()
+        self.f_eval_new(train_data, eval_data)
 
     def f_cluster_embedding(self):
         self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
@@ -147,6 +147,16 @@ class EVAL(object):
 
                     g_j = glist[j]
                     snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
+
+                    """
+                    get feature attn weight
+                    """
+
+                    for k in snode_id_j:
+                        predecessors = list(g_j.predecessors(k))
+                        edges_id = g_j.edge_ids(predecessors, k)
+                        
+
                     N = len(snode_id_j)
                     p_sent_j = g_j.ndata["p"][snode_id_j]
                     

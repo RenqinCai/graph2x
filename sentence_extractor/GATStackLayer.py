@@ -101,37 +101,26 @@ class GATLayer(nn.Module):
     def reduce_func(self, nodes):
         # start_time = time.time()
         
-
         alpha = F.softmax(nodes.mailbox['e'], dim=1)
 
         # end_time = time.time()
         # duration = end_time - start_time
         # print("+++ reduce duration 2", duration)
+        z = nodes.mailbox['z']
+        
+        h = torch.sum(alpha * z, dim=1)
 
-        h = torch.sum(alpha * nodes.mailbox['z'], dim=1)
         return {'sh': h}
 
     def forward(self, g, h):
-        # print("=== gat ==")
-        # start_time = time.time()
-
         z = self.fc(h)
-
-        # end_time = time.time()
-        # duration = end_time - start_time
-        # print("... duration 0", duration)
+        # print("z", z.size())
 
         g.ndata['z'] = z
         g.apply_edges(self.edge_attention)
-        # end_time = time.time()
-        # duration = end_time - start_time
-        # print("... duration 1", duration)
 
         g.update_all(self.message_func, self.reduce_func)
         g.ndata.pop('z')
         h = g.ndata.pop('sh')
 
-        # end_time = time.time()
-        # duration = end_time - start_time
-        # print("... duration 3", duration)
         return h

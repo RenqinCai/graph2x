@@ -180,6 +180,7 @@ class GraphX(nn.Module):
         h = self.m_gat(graph, x)
 
         graph.ndata["hidden_state"] = h
+
         # sent_state = self.feature2sent(graph, feature_state, sent_state)
 
         # end_time = time.time()
@@ -205,8 +206,6 @@ class GraphX(nn.Module):
 
         s_state = torch.cat(s_state_list, dim=0)
         logits = self.wh(s_state)
-
-        # print("logits", logits.size())
 
         return logits
 

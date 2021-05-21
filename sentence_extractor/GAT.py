@@ -19,7 +19,10 @@ class ALLGAT(nn.Module):
 
     def forward(self, g, x):
         h = x
-        h = F.elu(self.layer(g, h))
+
+        h = self.layer(g, h)
+
+        h = F.elu(h)
         # h = x + h
 
         h = self.layer_1(g, h)
