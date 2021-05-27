@@ -307,7 +307,7 @@ class RATEBEER(Dataset):
         G.ndata["dytpe"][feat_sent_node_num:] = torch.ones(user_node_num)*2
         uid2nid = [i+feat_sent_node_num for i in range(user_node_num)]
 
-        for i in range()
+        # for i in range()
         
 
 

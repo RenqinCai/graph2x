@@ -10,6 +10,7 @@ import dgl
 from GAT import ALLGAT
 import time
 
+
 class GraphX(nn.Module):
     def __init__(self, args, vocab_obj, device):
         super().__init__()
@@ -71,7 +72,6 @@ class GraphX(nn.Module):
 
         nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
 
-
     def f_load_feature_embedding(self, pre_feature_embed):
 
         pre_feature_embed_weight = []
@@ -112,7 +112,7 @@ class GraphX(nn.Module):
             feature2sent, sent2feature: tffrac=int, type=0
             feature2user, user2feature: tffrac=int, type=0
             feature2item, item2feature: tffrac=int, type=0
-        return: 
+        return:
             [sentnum, 2]
         """
 
@@ -208,4 +208,3 @@ class GraphX(nn.Module):
         # print("logits", logits.size())
 
         return logits
-

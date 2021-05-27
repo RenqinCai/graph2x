@@ -254,8 +254,8 @@ class TRAINER(object):
             for i, (G, index) in enumerate(eval_data):
                 eval_flag = random.randint(1, 100)
                 if eval_flag != 2:
-                	continue
-              
+                    continue
+
                 G = G.to(self.m_device)
 
                 logits = network(G)
@@ -301,7 +301,7 @@ class TRAINER(object):
                     topk_pred_snode_id_j = snode_id_j[topk_pred_idx_j]
 
                     topk_pred_sid_list_j = g_j.nodes[topk_pred_snode_id_j].data["raw_id"]
-                    topk_pred_logits_list_j =  g_j.nodes[topk_pred_snode_id_j].data["p"]
+                    topk_pred_logits_list_j = g_j.nodes[topk_pred_snode_id_j].data["p"]
 
                     # recall_j, precision_j = get_example_recall_precision(pred_sid_list_j.cpu(), label_sid_list_j, min(topk, N))
 

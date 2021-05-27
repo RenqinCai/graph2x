@@ -46,7 +46,7 @@ def main(args):
     if "beer" in args.data_name:
         train_data, valid_data, vocab_obj = data_obj.f_load_graph_ratebeer(args)
         # train_data, valid_data, vocab_obj = data_obj.f_load_ratebeer(args)
-    
+
     e_time = datetime.now()
     print("... save data duration ... ", e_time-s_time)
 
@@ -89,7 +89,7 @@ def main(args):
 
     if args.eval:
         print("="*10, "eval", "="*10)
-        
+
         eval_obj = EVAL(vocab_obj, args, device)
 
         network = network.to(device)
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     # parser.add_argument('--output_hidden_size', type=int, default=256)
     parser.add_argument('--head_num', type=int, default=4)
     parser.add_argument('--ffn_inner_hidden_size', type=int, default=256)
-    
+
 
     ### train
     parser.add_argument('--batch_size', type=int, default=128)
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     parser.add_argument('--momentum', type=float, default=0.99)
     parser.add_argument('--epoch_num', type=int, default=10)
     parser.add_argument('--print_interval', type=int, default=200)
-    
+
     ### hyper-param
     # parser.add_argument('--init_mult', type=float, default=1.0)
     # parser.add_argument('--variance', type=float, default=0.995)
@@ -153,5 +153,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     main(args)
-
-

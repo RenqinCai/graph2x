@@ -4,11 +4,52 @@ import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import numpy as np
-from collections import Counter 
+from collections import Counter
 import bottleneck as bn
 import collections
 import math
 from nltk.translate import bleu_score
+from rouge_score import rouge_scorer
+
+
+def get_feature_recall_precision(pred, ref):
+    '''
+    :param pred: list of features which appears in the predicted sentences
+    :param ref: list of features that are in the reference sentences
+
+    :return recall: the recall score of the pred features
+    :return precision: the precision score of the pred features
+    '''
+    recall = 0.0
+    precision = 0.0
+    recall_num = 0
+    precision_num = 0
+    pred_count = Counter(pred)
+    ref_count = Counter(ref)
+    for key, value in ref_count.items():
+        if key in pred_count:
+            recall_num += min(value, pred_count[key])
+    for key, value in pred_count.items():
+        if key in ref_count:
+            precision_num += min(value, ref_count[key])
+    recall = recall_num / len(ref)
+    precision = precision_num / len(pred)
+    return recall, precision
+
+
+def get_feature_recall_precision_rouge(pred, ref):
+    ''' using rouge-score to compute feature precision/recall
+    :param pred: list of features which appears in the predicted sentences
+    :param ref: list of features that are in the reference sentences
+
+    :return recall: the recall score of the pred features
+    :return precision: the precision score of the pred features
+    '''
+    pred_concat = " ".join(pred)
+    ref_concat = " ".join(pred)
+    scorer = rouge_scorer.RougeScorer(['rouge1'], use_stemmer=True)
+    scores = scorer.score(ref_concat, pred_concat)
+    return scores['rouge1'].recall, scores['rouge1'].precision
 
 
 def get_example_recall_precision(pred, target, k=1):
@@ -28,6 +69,7 @@ def get_example_recall_precision(pred, target, k=1):
 
     return recall, precision
 
+
 def _get_ngrams(segment, max_order):
     ngram_counts = collections.Counter()
     for order in range(1, max_order+1):
@@ -36,6 +78,7 @@ def _get_ngrams(segment, max_order):
             ngram_counts[ngram] += 1
 
     return ngram_counts
+
 
 def compute_bleu(references, hypotheses, max_order=4, smooth=False):
     matches_by_order = [0]*max_order
@@ -51,13 +94,13 @@ def compute_bleu(references, hypotheses, max_order=4, smooth=False):
         merged_ref_ngram_counts = collections.Counter()
         for reference in references:
             merged_ref_ngram_counts |= _get_ngrams(reference, max_order)
-        
+
         hyp_ngram_counts = _get_ngrams(hypothesis, max_order)
         overlap = hyp_ngram_counts & merged_ref_ngram_counts
 
         for ngram in overlap:
             matches_by_order[len(ngram)-1] += overlap[ngram]
-        
+
         for order in range(1, max_order+1):
             possible_matches = len(hypothesis)-order+1
             if possible_matches > 0:
@@ -90,12 +133,12 @@ def compute_bleu(references, hypotheses, max_order=4, smooth=False):
 
     return bleu
 
+
 def get_bleu(references, hypotheses, types=[1, 2, 3, 4]):
-    type_weights = [[1.0, 0., 0., 0], 
+    type_weights = [[1.0, 0., 0., 0],
                     [0.5, 0.5, 0.0, 0.0],
                     [1.0/3, 1.0/3, 1.0/3, 0.0],
-                    [0.25, 0.25, 0.25, 0.25]
-                ]
+                    [0.25, 0.25, 0.25, 0.25]]
 
     totals = [0.0] * len(types)
 
@@ -104,7 +147,7 @@ def get_bleu(references, hypotheses, types=[1, 2, 3, 4]):
     num = 0
 
     for (reference, hypothesis) in zip(references, hypotheses):
-        
+
         for j, t in enumerate(types):
             weights = type_weights[t-1]
             totals[j] += bleu_score.sentence_bleu(reference, hypothesis, smoothing_function=sf.method1, weights=weights)
@@ -114,5 +157,3 @@ def get_bleu(references, hypotheses, types=[1, 2, 3, 4]):
     totals = [total/num for total in totals]
 
     return totals
-
-    

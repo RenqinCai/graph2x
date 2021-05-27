@@ -202,16 +202,15 @@ class RATEBEER(Dataset):
         self.m_cdd_sid_list_list = []
         self.m_label_sid_list_list = []
 
-
         self.m_graph_path = ""
- 
+
     def load_train_graph_data(self, graph_path):
         print("... train ...", graph_path)
-        self.m_graph_path = graph_path        
+        self.m_graph_path = graph_path
 
     def load_eval_graph_data(self, graph_path):
         print("... eval ...", graph_path)
-        self.m_graph_path = graph_path        
+        self.m_graph_path = graph_path
 
     def __len__(self):
         graph_path = self.m_graph_path
@@ -238,7 +237,7 @@ class RATEBEER(Dataset):
         # file_num = 1000
         print("file_num", file_num)
         return file_num
-    
+
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
             idx = idx.tolist()

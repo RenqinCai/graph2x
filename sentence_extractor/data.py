@@ -9,7 +9,7 @@ import pandas as pd
 import argparse
 import pickle
 
-from torch.utils.data import dataset 
+from torch.utils.data import dataset
 from torch.utils.data import DataLoader
 
 # from movie import MOVIE, MOVIE_TEST
@@ -57,7 +57,7 @@ class DATA():
         valid_loader = DataLoader(dataset=valid_data, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=graph_collate_fn)
 
         return train_loader, valid_loader, vocab_obj
-    
+
 import dgl
 
 
