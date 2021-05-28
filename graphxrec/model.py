@@ -195,7 +195,7 @@ class HSumDocGraph(HSumGraph):
 
         s_state = torch.cat(s_state_list, dim=0)
         result = self.wh(s_state)
-        return resul
+        return result
 
     def set_dnfeature(self, graph):
         """ init doc node by mean pooling on the its sent node (connected by the edges with type=1) """
