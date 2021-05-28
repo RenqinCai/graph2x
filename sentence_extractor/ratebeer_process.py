@@ -9,7 +9,8 @@ import copy
 from collections import Counter 
 import dgl
 from dgl.data.utils import save_graphs, load_graphs
-from multiprocessing import Pool 
+from multiprocessing import Pool
+
 
 def readJson(fname):
     data = []
@@ -23,6 +24,7 @@ def readJson(fname):
             except:
                 print("error", line_num)
     return data
+
 
 class Vocab():
     def __init__(self):
@@ -44,7 +46,7 @@ class Vocab():
 
         self.m_train_sent_num = 0
         self.m_test_sent_num = 0
-        
+
     def f_set_user2uid_vocab(self, user2uid):
         self.m_user2uid = user2uid
         self.m_user_num = len(self.m_user2uid)
@@ -106,12 +108,12 @@ class Vocab():
                 self.m_sent2sid[sentid_i] = sid_i
 
             sid_i = self.m_sent2sid[sentid_i]
-            
+
             self.m_sid2swords[sid_i] = sentwords_i
 
         print("load sent num eval", sent_num)
         print("total sent num", len(self.m_sent2sid))
-    
+
     def f_load_sent_embed(self, sent_embed_file):
         ### sid 2 embed
         sent2sid_dict = self.m_sent2sid
@@ -130,11 +132,11 @@ class Vocab():
             if sentid_i not in sent2sid_dict:
                 print("error missing sent", sentid_i)
                 continue
-            
+
             sid_i = sent2sid_dict[sentid_i]
             if sid_i not in self.m_sid2sembed:
                 self.m_sid2sembed[sid_i] = sentembed_i
-    
+
     def f_load_feature_embed(self, feature_embed_file):
         self.m_feature2fid = {}
         self.m_fid2fembed = {}
@@ -146,14 +148,14 @@ class Vocab():
         featureid_list = list(feature_embed.keys())
         for featureid_i in featureid_list:
             featureembed_i = feature_embed[featureid_i]
-            
+
             if featureid_i not in self.m_feature2fid:
                 fid_i = len(self.m_feature2fid)
                 self.m_feature2fid[featureid_i] = fid_i
 
             fid_i = self.m_feature2fid[featureid_i]
             if fid_i not in self.m_fid2fembed:
-                self.m_fid2fembed[fid_i] = featureembed_i        
+                self.m_fid2fembed[fid_i] = featureembed_i
 
     @property
     def user_num(self):
@@ -178,6 +180,7 @@ class Vocab():
     @property
     def train_sent_num(self):
         return self.m_train_sent_num
+
 
 class RATEBEER(Dataset):
     def __init__(self):
@@ -258,8 +261,8 @@ class RATEBEER(Dataset):
         G.set_n_initializer(dgl.init.zero_initializer)
         G.ndata["unit"] = torch.zeros(fid_node_num)
         G.ndata["dtype"] = torch.zeros(fid_node_num)
-        G.ndata["id"] = torch.LongTensor(list(nid2fid.keys()))
-        G.ndata["raw_id"] = torch.LongTensor(list(fid2nid.keys()))
+        G.ndata["id"] = torch.LongTensor(list(nid2fid.keys()))          # id is the nodeid
+        G.ndata["raw_id"] = torch.LongTensor(list(fid2nid.keys()))      # raw_id is the fid, which is the refined featureid
 
         return fid2nid, nid2fid
 
@@ -363,7 +366,7 @@ class RATEBEER(Dataset):
         return G
     
     def load_graph_data(self, input_graph_dir):
-        self.m_input_graph_path = input_graph_dir 
+        self.m_input_graph_path = input_graph_dir
 
     def get_example(self, idx):
         i = idx
@@ -377,6 +380,7 @@ class RATEBEER(Dataset):
         example = {"g":g_i, "label_sid":gt_label_sid_list_i}
 
         return example
+
 
 class RATEBEER_TRAIN(RATEBEER):
     def __init__(self):
@@ -682,7 +686,7 @@ class RATEBEER_TRAIN(RATEBEER):
 
             g_file_i = self.m_output_graph_dir+str(i)+".bin"
             save_graphs(g_file_i, [g_i], gt_label_i)
-    
+
 
 class RATEBEER_VALID(RATEBEER):
     def __init__(self):
@@ -693,9 +697,9 @@ class RATEBEER_VALID(RATEBEER):
         print("++"*10, "validation data", "++"*10)
 
         self.m_label_sid_list_list = []
-    
+
     def load_useritem_cdd_label_sent(self, vocab, useritem_candidate_label_sent_file):
-        #### read pair data 
+        #### read pair data
 
         user2uid_dict = vocab.m_user2uid
         item2iid_dict = vocab.m_item2iid
@@ -739,12 +743,12 @@ class RATEBEER_VALID(RATEBEER):
                 if itemid_ij not in item2iid_dict:
                     print("error missing item", itemid_ij)
                     continue
-                
+
                 iid_ij = item2iid_dict[itemid_ij]
 
                 cdd_sid_list_ij = []
                 for sentid_ijk in cdd_sentid_list_ij:
-                 
+
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing cdd sent", sentid_ijk)
                         continue
@@ -754,7 +758,7 @@ class RATEBEER_VALID(RATEBEER):
 
                 gt_label_sid_list_ij = []
                 gt_label_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][1]
-                
+
                 for sentid_ijk in gt_label_sentid_list_ij:
                     sentid_ijk = train_sent_num+int(sentid_ijk)
                     sentid_ijk = str(sentid_ijk)
@@ -762,7 +766,7 @@ class RATEBEER_VALID(RATEBEER):
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing label sent", sentid_ijk)
                         continue
-                    
+
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     gt_label_sid_list_ij.append(sid_ijk)
 
@@ -778,14 +782,14 @@ class RATEBEER_VALID(RATEBEER):
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing label sent", sentid_ijk)
                         continue
-                    
+
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     label_sid_list_ij.append(sid_ijk)
 
                 if len(label_sid_list_ij) == 0:
                     exit()
                     continue
-                
+
                 uid_list.append(uid_i)
                 iid_list.append(iid_ij)
                 cdd_sid_list_list.append(cdd_sid_list_ij)
@@ -832,7 +836,7 @@ class RATEBEER_VALID(RATEBEER):
             if graph_idx % 2e4 == 0:
                 print("graph idx", graph_idx)
             
-            pool_idx = graph_idx%pool_num
+            pool_idx = graph_idx % pool_num
             idx_list_pool[pool_idx].append(graph_idx)
 
         with Pool(pool_num) as p:
@@ -855,7 +859,8 @@ class RATEBEER_VALID(RATEBEER):
 
             g_file_i = self.m_output_graph_dir+str(i)+".bin"
             save_graphs(g_file_i, [g_i], gt_label_i)
-    
+
+
 class RATEBEER_TEST(RATEBEER):
     def __init__(self):
         super().__init__()
@@ -864,9 +869,9 @@ class RATEBEER_TEST(RATEBEER):
         print("++"*10, "testing data", "++"*10)
 
         self.m_label_sid_list_list = []
-    
+
     def load_useritem_cdd_label_sent(self, vocab, useritem_candidate_label_sent_file):
-        #### read pair data 
+        #### read pair data
 
         user2uid_dict = vocab.m_user2uid
         item2iid_dict = vocab.m_item2iid
@@ -910,12 +915,11 @@ class RATEBEER_TEST(RATEBEER):
                 if itemid_ij not in item2iid_dict:
                     print("error missing item", itemid_ij)
                     continue
-                
+
                 iid_ij = item2iid_dict[itemid_ij]
 
                 cdd_sid_list_ij = []
                 for sentid_ijk in cdd_sentid_list_ij:
-                 
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing cdd sent", sentid_ijk)
                         continue
@@ -925,7 +929,7 @@ class RATEBEER_TEST(RATEBEER):
 
                 gt_label_sid_list_ij = []
                 gt_label_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][1]
-                
+
                 for sentid_ijk in gt_label_sentid_list_ij:
                     sentid_ijk = train_sent_num+int(sentid_ijk)
                     sentid_ijk = str(sentid_ijk)
@@ -933,7 +937,7 @@ class RATEBEER_TEST(RATEBEER):
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing label sent", sentid_ijk)
                         continue
-                    
+
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     gt_label_sid_list_ij.append(sid_ijk)
 
@@ -949,14 +953,14 @@ class RATEBEER_TEST(RATEBEER):
                     if sentid_ijk not in sent2sid_dict:
                         print("error missing label sent", sentid_ijk)
                         continue
-                    
+
                     sid_ijk = sent2sid_dict[sentid_ijk]
                     label_sid_list_ij.append(sid_ijk)
 
                 if len(label_sid_list_ij) == 0:
                     exit()
                     continue
-                
+
                 uid_list.append(uid_i)
                 iid_list.append(iid_ij)
                 cdd_sid_list_list.append(cdd_sid_list_ij)
@@ -970,7 +974,7 @@ class RATEBEER_TEST(RATEBEER):
         self.m_gt_label_sid_list_list = gt_label_sid_list_list
 
     def load_raw_data(self, vocab, uid2fid2tfidf_dict, iid2fid2tfidf_dict, sid2fid2tfidf_dict, sent_content_file, useritem_candidate_label_sent_file, output_graph_dir, save_graph_flag=False):
-        
+
         self.m_uid2fid2tfidf_dict = uid2fid2tfidf_dict
         self.m_iid2fid2tfidf_dict = iid2fid2tfidf_dict
         self.m_sid2fid2tfidf_dict = sid2fid2tfidf_dict
@@ -1001,8 +1005,8 @@ class RATEBEER_TEST(RATEBEER):
 
             if graph_idx % 2e4 == 0:
                 print("graph idx", graph_idx)
-            
-            pool_idx = graph_idx%pool_num
+
+            pool_idx = graph_idx % pool_num
             idx_list_pool[pool_idx].append(graph_idx)
 
         # for pool_idx in range(pool_num):
@@ -1023,8 +1027,8 @@ class RATEBEER_TEST(RATEBEER):
 
             # g_file_i = output_dir+str(i)+".bin"
             # save_graphs(g_file_i, [g_i], gt_label_i)
-        
-        print("... finish saving testing graph %d files ..."%graph_num)
+
+        print("... finish saving testing graph %d files ..." % graph_num)
 
     def f_save_a_graph(self, idx_list):
         print("pool", len(idx_list))

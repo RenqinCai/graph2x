@@ -3,10 +3,9 @@ import torch.nn as nn
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 import time
-
 import dgl
+
 
 class MultiHeadLayer(nn.Module):
     def __init__(self, in_dim, out_dim, head_num, attn_drop_out, layer, merge='cat'):
@@ -29,13 +28,14 @@ class MultiHeadLayer(nn.Module):
             result = torch.mean(torch.stack(head_outs))
         return result
 
+
 class PositionwiseFeedForward(nn.Module):
     ''' A two-feed-forward-layer module '''
 
     def __init__(self, d_in, d_hid, dropout=0.1):
         super().__init__()
-        self.w_1 = nn.Conv1d(d_in, d_hid, 1) # position-wise
-        self.w_2 = nn.Conv1d(d_hid, d_in, 1) # position-wise
+        self.w_1 = nn.Conv1d(d_in, d_hid, 1)    # position-wise
+        self.w_2 = nn.Conv1d(d_hid, d_in, 1)    # position-wise
         self.layer_norm = nn.LayerNorm(d_in)
         self.dropout = nn.Dropout(dropout)
 
@@ -53,6 +53,7 @@ class PositionwiseFeedForward(nn.Module):
         output = self.layer_norm(output + residual)
         assert not torch.any(torch.isnan(output)), "FFN output"
         return output
+
 
 class GATLayer(nn.Module):
     def __init__(self, in_dim, out_dim):
@@ -100,7 +101,7 @@ class GATLayer(nn.Module):
 
     def reduce_func(self, nodes):
         # start_time = time.time()
-        
+
         alpha = F.softmax(nodes.mailbox['e'], dim=1)
 
         # end_time = time.time()

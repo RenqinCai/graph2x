@@ -9,7 +9,7 @@ import pandas as pd
 import argparse
 import pickle
 
-from torch.utils.data import dataset 
+from torch.utils.data import dataset
 from torch.utils.data import DataLoader
 
 # from movie import MOVIE, MOVIE_TEST
@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 
 from ratebeer import RATEBEER
 from ratebeer_process import Vocab
+
 
 class DATA():
     def __init__(self):
@@ -56,14 +57,16 @@ class DATA():
         valid_loader = DataLoader(dataset=valid_data, batch_size=batch_size, shuffle=False, num_workers=4, collate_fn=graph_collate_fn)
 
         return train_loader, valid_loader, vocab_obj
-    
+
 import dgl
 
+
 def graph_collate_fn(samples):
+    # ?
     graphs, index = map(list, zip(*samples))
     graph_len = [len(g.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)) for g in graphs]
     sorted_len, sorted_index = torch.sort(torch.LongTensor(graph_len), dim=0, descending=True)
     batched_graph = dgl.batch([graphs[idx] for idx in sorted_index])
     batched_index = [index[idx] for idx in sorted_index]
 
-    return batched_graph, batched_index    
+    return batched_graph, batched_index
