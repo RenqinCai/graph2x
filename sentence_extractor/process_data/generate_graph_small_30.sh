@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python generate_graph.py --data_dir "/p/reviewde/data/ratebeer/graph/small_30/" --graph_dir "/p/reviewde/data/ratebeer/graph/small_30/graph_batch/" --data_name "ratebeer"
