@@ -126,11 +126,11 @@ class TRAINER(object):
                     print("last train loss %.4f"%last_train_loss, "cur train loss %.4f"%self.m_mean_train_loss)
                     last_train_loss = self.m_mean_train_loss
 
-                if best_eval_bleu < self.m_mean_eval_bleu:
-                    print("... saving model ...")
-                    checkpoint = {'model':network.state_dict()}
-                    self.f_save_model(checkpoint)
-                    best_eval_bleu = self.m_mean_eval_bleu
+                # if best_eval_bleu < self.m_mean_eval_bleu:
+                print("... saving model ...")
+                checkpoint = {'model':network.state_dict()}
+                self.f_save_model(checkpoint)
+                best_eval_bleu = self.m_mean_eval_bleu
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
@@ -141,11 +141,11 @@ class TRAINER(object):
             print("--"*20)
             print("... exiting from training early")
            
-            if best_eval_recall < self.m_mean_eval_recall:
-                    print("... final save ...")
-                    checkpoint = {'model':network.state_dict()}
-                    self.f_save_model(checkpoint)
-                    best_eval_recall = self.m_mean_eval_recall
+            # if best_eval_recall < self.m_mean_eval_recall:
+            print("... final save ...")
+            checkpoint = {'model':network.state_dict()}
+            self.f_save_model(checkpoint)
+            best_eval_recall = self.m_mean_eval_recall
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
@@ -440,7 +440,7 @@ class TRAINER(object):
                 G.nodes[snode_id].data["p"] = logits
                 glist = dgl.unbatch(G)
 
-                loss = self.m_rec_loss(glist)
+                # loss = self.m_rec_loss(glist)
 
                 for j in range(len(glist)):
                     hyps_j = []
@@ -506,16 +506,16 @@ class TRAINER(object):
 
                     # bleu_4_list.append(bleu_4_scores_j)
 
-                loss_list.append(loss.item())
+                # loss_list.append(loss.item())
 
             end_time = time.time()
             duration = end_time - start_time
             print("... one epoch", duration)
 
-            logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
+            # logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
                 
-        self.m_mean_eval_loss = np.mean(loss_list)
+        # self.m_mean_eval_loss = np.mean(loss_list)
         # self.m_mean_eval_recall = np.mean(recall_list)
         # self.m_mean_eval_precision = np.mean(precision_list)
 
@@ -531,13 +531,14 @@ class TRAINER(object):
         self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
+        self.m_mean_eval_bleu = 0.0
         # self.m_mean_eval_bleu = np.mean(bleu_list)
         # self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
         # self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
         # self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
         # self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
-        logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
+        # logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
         logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
         # logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
         # logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
