@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from loss import XE_LOSS, BPR_LOSS, SIG_LOSS
-from metric import get_example_recall_precision, compute_bleu, get_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu, get_sentence_bleu
 from model import GraphX
 # from infer_new import _INFER
 import random
@@ -37,7 +37,7 @@ class TRAINER(object):
         self.m_mean_eval_recall = 0
 
         self.m_mean_eval_bleu = 0
-        
+
         self.m_epochs = args.epoch_num
         self.m_batch_size = args.batch_size
 
@@ -82,7 +82,7 @@ class TRAINER(object):
         best_eval_recall = 0
         best_eval_bleu = 0
         # self.f_init_word_embed(pretrain_word_embed, network)
-        try: 
+        try:
             for epoch in range(self.m_epochs):
                 
                 print("++"*10, epoch, "++"*10)
@@ -140,10 +140,10 @@ class TRAINER(object):
         except KeyboardInterrupt:
             print("--"*20)
             print("... exiting from training early")
-           
+
             # if best_eval_recall < self.m_mean_eval_recall:
             print("... final save ...")
-            checkpoint = {'model':network.state_dict()}
+            checkpoint = {'model': network.state_dict()}
             self.f_save_model(checkpoint)
             best_eval_recall = self.m_mean_eval_recall
 
@@ -183,13 +183,12 @@ class TRAINER(object):
             # node_loss = self.m_rec_loss(logits, labels)
 
             # node_loss = self.m_criterion(logits, labels)
-            
+
             # G.nodes[snode_id].data["loss"] = node_loss
             # loss = dgl.sum_nodes(G, "loss")
             # loss = loss.mean()
 
-            loss_list.append(loss.item()) 
-            
+            loss_list.append(loss.item())
             tmp_loss_list.append(loss.item())
 
             optimizer.zero_grad()
@@ -329,10 +328,12 @@ class TRAINER(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    # bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
                     bleu_list.append(bleu_scores_j)
 
-                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
 
                     bleu_1_list.append(bleu_1_scores_j)
 
@@ -350,7 +351,7 @@ class TRAINER(object):
 
             logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
-                
+
         self.m_mean_eval_loss = np.mean(loss_list)
         self.m_mean_eval_recall = np.mean(recall_list)
         self.m_mean_eval_precision = np.mean(precision_list)
@@ -493,10 +494,10 @@ class TRAINER(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    # bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    # bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
                     # bleu_list.append(bleu_scores_j)
 
-                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], [hyps_j])
 
                     # bleu_1_list.append(bleu_1_scores_j)
 
@@ -514,7 +515,7 @@ class TRAINER(object):
 
             # logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
-                
+
         # self.m_mean_eval_loss = np.mean(loss_list)
         # self.m_mean_eval_recall = np.mean(recall_list)
         # self.m_mean_eval_precision = np.mean(precision_list)
@@ -547,4 +548,3 @@ class TRAINER(object):
         # logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
         network.train()
-

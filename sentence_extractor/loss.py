@@ -1,11 +1,12 @@
 import torch
-from torch import device
+# from torch import device
 import torch.nn as nn
 from torch.autograd import Variable
 import torch.nn.functional as F
 import numpy as np
 from collections import Counter 
 import bottleneck as bn
+
 
 class SIG_LOSS(nn.Module):
     def __init__(self, device):
@@ -19,12 +20,13 @@ class SIG_LOSS(nn.Module):
 
         return loss
 
+
 class XE_LOSS(nn.Module):
     def __init__(self, item_num, device):
         super(XE_LOSS, self).__init__()
         self.m_item_num = item_num
         self.m_device = device
-    
+
     def forward(self, preds, targets):
         # print("==="*10)
         # print(targets.size())
@@ -46,6 +48,7 @@ class XE_LOSS(nn.Module):
 
         return xe_loss
 
+
 class BPR_LOSS(nn.Module):
     def __init__(self, device):
         super(BPR_LOSS, self).__init__()
@@ -62,20 +65,20 @@ class BPR_LOSS(nn.Module):
 
             log_prob = []
             for soft_label_idx in range(1, soft_label_num):
-                
+
                 pos_mask = (labels == soft_label_idx)
                 neg_mask = (labels < soft_label_idx)
 
                 pos_logits = logits[pos_mask]
                 neg_logits = logits[neg_mask]
 
-
                 if pos_logits.size()[0] == 0:
                     continue
 
                 if neg_logits.size()[0] == 0:
                     continue
-                
+
+                # form pairwise difference in logits value between pos and neg
                 delta_logits = pos_logits.unsqueeze(1)-neg_logits
 
                 log_prob.append(F.logsigmoid(delta_logits).mean().unsqueeze(-1))
@@ -90,6 +93,3 @@ class BPR_LOSS(nn.Module):
         loss = loss.mean()
 
         return loss
-
-           
-

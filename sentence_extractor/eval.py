@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision
+from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_sentence_bleu
 from rouge import Rouge
 import dgl
 import pickle
@@ -453,6 +453,8 @@ class EVAL(object):
                     # compute recall score of features
                     recall_f_j, precision_f_j = get_feature_recall_precision(pred_feature_j, refs_feature_j)
 
+                    # TODO: Double-check how the bleu score is computed
+                    # think that the sentences should be tokenzied before feeding into the compute_bleu() function
                     hyps_j = " ".join(hyps_j)
                     refs_j = " ".join(refs_j)
 
@@ -514,13 +516,15 @@ class EVAL(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    bleu_scores_j = compute_bleu([refs_j], [hyps_j])
+                    # bleu_scores_j = compute_bleu([refs_j], [hyps_j])
+                    bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
                     bleu_list.append(bleu_scores_j)
 
                     feature_recall_list.append(recall_f_j)
                     feature_precision_list.append(precision_f_j)
 
-                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
 
                     # bleu_1_scores_j = compute_bleu_order([refs_j], [hyps_j], order=1)
                     bleu_1_list.append(bleu_1_scores_j)
