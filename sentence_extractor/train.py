@@ -42,9 +42,9 @@ class TRAINER(object):
         self.m_batch_size = args.batch_size
 
         # self.m_rec_loss = XE_LOSS(vocab_obj.item_num, self.m_device)
-        # self.m_rec_loss = BPR_LOSS(self.m_device)
+        self.m_rec_loss = BPR_LOSS(self.m_device)
         # self.m_rec_loss = SIG_LOSS(self.m_device)
-        self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
+        # self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
         self.m_train_step = 0
         self.m_valid_step = 0
@@ -176,14 +176,17 @@ class TRAINER(object):
             logits = network(G)
 
             snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
-            labels = G.ndata["label"][snode_id]
+            G.nodes[snode_id].data["p"] = logits
 
-            labels = labels.float()
-            node_loss = self.m_criterion(logits, labels)
+            glist = dgl.unbatch(G)
+            loss = self.m_rec_loss(glist)
+            # node_loss = self.m_rec_loss(logits, labels)
+
+            # node_loss = self.m_criterion(logits, labels)
             
-            G.nodes[snode_id].data["loss"] = node_loss
-            loss = dgl.sum_nodes(G, "loss")
-            loss = loss.mean()
+            # G.nodes[snode_id].data["loss"] = node_loss
+            # loss = dgl.sum_nodes(G, "loss")
+            # loss = loss.mean()
 
             loss_list.append(loss.item()) 
             
@@ -260,22 +263,11 @@ class TRAINER(object):
 
                 logits = network(G)
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
-                labels = G.ndata["label"][snode_id]
-
-                # print("labels", labels.size())
-                # one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
-
-                # node_loss = self.m_criterion(logits, one_hot_labels)
-
-                labels = labels.float()
-                node_loss = self.m_criterion(logits, labels)
-
-                G.nodes[snode_id].data["loss"] = node_loss
-                loss = dgl.sum_nodes(G, "loss")
-                loss = loss.mean()
 
                 G.nodes[snode_id].data["p"] = logits
                 glist = dgl.unbatch(G)
+
+                loss = self.m_rec_loss(glist)
 
                 for j in range(len(glist)):
                     hyps_j = []
@@ -444,22 +436,11 @@ class TRAINER(object):
 
                 logits = network(G)
                 snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
-                labels = G.ndata["label"][snode_id]
-
-                # print("labels", labels.size())
-                # one_hot_labels = F.one_hot(labels.squeeze(-1), num_classes=2).float()
-
-                # node_loss = self.m_criterion(logits, one_hot_labels)
-
-                labels = labels.float()
-                node_loss = self.m_criterion(logits, labels)
-
-                G.nodes[snode_id].data["loss"] = node_loss
-                loss = dgl.sum_nodes(G, "loss")
-                loss = loss.mean()
 
                 G.nodes[snode_id].data["p"] = logits
                 glist = dgl.unbatch(G)
+
+                loss = self.m_rec_loss(glist)
 
                 for j in range(len(glist)):
                     hyps_j = []
@@ -512,18 +493,18 @@ class TRAINER(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
-                    bleu_list.append(bleu_scores_j)
+                    # bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    # bleu_list.append(bleu_scores_j)
 
-                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
 
-                    bleu_1_list.append(bleu_1_scores_j)
+                    # bleu_1_list.append(bleu_1_scores_j)
 
-                    bleu_2_list.append(bleu_2_scores_j)
+                    # bleu_2_list.append(bleu_2_scores_j)
 
-                    bleu_3_list.append(bleu_3_scores_j)
+                    # bleu_3_list.append(bleu_3_scores_j)
 
-                    bleu_4_list.append(bleu_4_scores_j)
+                    # bleu_4_list.append(bleu_4_scores_j)
 
                 loss_list.append(loss.item())
 
@@ -550,19 +531,19 @@ class TRAINER(object):
         self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
-        self.m_mean_eval_bleu = np.mean(bleu_list)
-        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
-        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
-        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
-        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
+        # self.m_mean_eval_bleu = np.mean(bleu_list)
+        # self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
+        # self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
+        # self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
+        # self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
         logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
         logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
-        logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
-        logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
-        logger_obj.f_add_output2IO("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
-        logger_obj.f_add_output2IO("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
-        logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
+        # logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
+        # logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
+        # logger_obj.f_add_output2IO("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
+        # logger_obj.f_add_output2IO("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
+        # logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
         network.train()
 

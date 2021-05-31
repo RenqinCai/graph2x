@@ -607,6 +607,100 @@ class RATEBEER_TRAIN(RATEBEER):
         self.m_cdd_sid_list_list = cdd_sid_list_list
         self.m_gt_label_sid_list_list = gt_label_sid_list_list
 
+    def load_useritem_cdd_soft_label_sent(self, vocab, useritem_candidate_label_sent_file):
+        #### read pair data 
+
+        user2uid_dict = vocab.m_user2uid
+        item2iid_dict = vocab.m_item2iid
+        sent2sid_dict = vocab.m_sent2sid
+
+        uid_list = []
+        iid_list = []
+        cdd_sid_list_list = []
+        gt_label_sid_list_list = []
+
+        #### useritem_sent {userid: {itemid: [cdd_sentid] [label_sentid]}}
+        useritem_cdd_label_sent = readJson(useritem_candidate_label_sent_file)[0]
+        useritem_cdd_label_sent_num = len(useritem_cdd_label_sent)
+        print("useritem_cdd_label_sent_num", useritem_cdd_label_sent_num)
+
+        train_sent_num = vocab.m_train_sent_num
+
+        userid_list = useritem_cdd_label_sent.keys()
+        userid_list = list(userid_list)
+        user_num = len(userid_list)
+
+        # user_num = 2
+
+        for i in range(user_num):
+            # data_i = useritem_cdd_label_sent[i]
+
+            # userid_i = list(data_i.keys())[0]
+            userid_i = userid_list[i]
+            itemid_list_i = list(useritem_cdd_label_sent[userid_i].keys())
+
+            for itemid_ij in itemid_list_i:
+                
+                cdd_sentid_list_ij = useritem_cdd_label_sent[userid_i][itemid_ij][0]
+
+                if userid_i not in user2uid_dict:
+                    print("error missing user", userid_i)
+                    continue
+
+                uid_i = user2uid_dict[userid_i]
+
+                if itemid_ij not in item2iid_dict:
+                    print("error missing item", itemid_ij)
+                    continue
+                
+                iid_ij = item2iid_dict[itemid_ij]
+
+                cdd_sid_list_ij = []
+
+                for sentid_ijk in cdd_sentid_list_ij:
+                        
+                    if sentid_ijk not in sent2sid_dict:
+                        print("error missing cdd sent", sentid_ijk)
+                        continue
+
+                    sid_ijk = sent2sid_dict[sentid_ijk]
+                    cdd_sid_list_ij.append(sid_ijk)
+                
+                cdd_sentid_dict_ij = useritem_cdd_label_sent[userid_i][itemid_ij][2]
+                
+                ### [0, 0.5]-->0
+                ### [0.5, 1.25]-->1
+                ### [1.25, 2]-->2
+                ### [2]-->3
+                soft_label_num = 4
+                gt_label_sid_list_ij = [[] for i in range(soft_label_num)]
+
+                for sentid_ijk in cdd_sentid_dict_ij:
+                    
+                    bleu_ijk = cdd_sentid_dict_ij[sentid_ijk]
+                    soft_label = bleu_ijk[1]+bleu_ijk[2]
+
+                    soft_label = get_softlabel(soft_label) 
+                    soft_label = int(soft_label)
+
+                    sid_ijk = sent2sid_dict[sentid_ijk]
+
+                    gt_label_sid_list_ij[soft_label].append(sid_ijk)
+
+                if len(gt_label_sid_list_ij) == 0:
+                    exit()
+                    continue
+                
+                uid_list.append(uid_i)
+                iid_list.append(iid_ij)
+                cdd_sid_list_list.append(cdd_sid_list_ij)
+                gt_label_sid_list_list.append(gt_label_sid_list_ij)
+
+        self.m_uid_list = uid_list
+        self.m_iid_list = iid_list
+        self.m_cdd_sid_list_list = cdd_sid_list_list
+        self.m_gt_label_sid_list_list = gt_label_sid_list_list
+
     def load_raw_data(self, sent_content_file, sent_embed_file, feature_embed_file, useritem_candidate_label_sent_file, user_feature_file, item_feature_file, sent_feature_file, output_graph_dir, save_graph_flag=False):
 
         """load vocab"""
@@ -631,7 +725,8 @@ class RATEBEER_TRAIN(RATEBEER):
         print("... load sentence feature ...")
         self.load_sent_feature(vocab_obj, sent_feature_file)
 
-        self.load_useritem_cdd_label_sent(vocab_obj, useritem_candidate_label_sent_file)
+        # self.load_useritem_cdd_label_sent(vocab_obj, useritem_candidate_label_sent_file)
+        self.load_useritem_cdd_soft_label_sent(vocab_obj, useritem_candidate_label_sent_file)
 
         print("... load train data ...", len(self.m_uid_list), len(self.m_iid_list), len(self.m_cdd_sid_list_list))
 
@@ -640,35 +735,111 @@ class RATEBEER_TRAIN(RATEBEER):
             self.f_save_graphs(output_graph_dir)
 
         return vocab_obj    
-    
-    # def f_save_graphs(self, output_dir):
 
-    #     graph_num = len(self.m_uid_list)
-    #     graph_summary_file = "graph_summary.txt"
-    #     graph_summary_file = os.path.join(output_dir, graph_summary_file)
-
-    #     with open(graph_summary_file, "w") as f:
-    #         f.write(str(graph_num))
-    #     graph_num = 10
-    #     for graph_idx in range(graph_num):
-
-    #         if graph_idx % 2e4 == 0:
-    #             print("graph idx", graph_idx)
-
-    #         i = graph_idx
-    #         uid_i = self.m_uid_list[i]
-    #         iid_i = self.m_iid_list[i]
-    #         cdd_sid_list_i = self.m_cdd_sid_list_list[i]
-    #         gt_label_sid_list_i = self.m_gt_label_sid_list_list[i]
-
-    #         g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
-
-    #         gt_label_i = {"gt_label": torch.tensor(gt_label_sid_list_i)}
-
-    #         g_file_i = output_dir+str(i)+".bin"
-    #         save_graphs(g_file_i, [g_i], gt_label_i)
+    def create_soft_graph(self, uid, iid, sid_list, label_list):
+        G = dgl.DGLGraph()
         
-    #     print("... finish saving training %d files ..."%graph_num)
+        ### add feature nodes
+        fid2nid, nid2fid = self.add_feature_node(G, uid, iid, sid_list)
+        feature_node_num = len(fid2nid)
+        
+        ### add sent nodes
+        sent_node_num = len(sid_list)
+        sid2nid = {}
+        nid2sid = {}
+        for i in range(sent_node_num):
+            sid_i = sid_list[i]
+            nid_i = feature_node_num+i
+
+            sid2nid[sid_i] = nid_i
+            nid2sid[nid_i] = sid_i
+
+        G.add_nodes(sent_node_num)
+        G.ndata["unit"][feature_node_num:] = torch.ones(sent_node_num)
+        G.ndata["dtype"][feature_node_num:] = torch.ones(sent_node_num)
+        G.ndata["id"][feature_node_num:] = torch.LongTensor(list(nid2sid.keys()))
+        G.ndata["raw_id"][feature_node_num:] = torch.LongTensor(list(sid2nid.keys()))
+
+        feat_sent_node_num = feature_node_num+sent_node_num
+
+        ### add user, item nodes
+        ### add user node
+
+        user_node_num = 1
+        G.add_nodes(user_node_num)
+        G.ndata["unit"][feat_sent_node_num:] = torch.ones(user_node_num)
+        G.ndata["dtype"][feat_sent_node_num:] = torch.ones(user_node_num)*2
+        G.ndata["id"][feat_sent_node_num:] = torch.LongTensor([uid])
+        G.ndata["raw_id"][feat_sent_node_num:] = torch.LongTensor([uid])
+
+        uid2nid = {uid:feat_sent_node_num}
+        nid2uid = {feat_sent_node_num:uid}
+    
+        ### add item noe
+        item_node_num = 1
+        G.add_nodes(item_node_num)
+        G.ndata["unit"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)
+        G.ndata["dtype"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)*3
+        G.ndata["id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
+        G.ndata["raw_id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
+
+        iid2nid = {iid:feat_sent_node_num+user_node_num}
+        nid2iid = {feat_sent_node_num+user_node_num:iid}
+        
+        ### add edges from sents to features
+        for i in range(sent_node_num):
+            sid = sid_list[i]
+            nid_s = sid2nid[sid]
+            fid2tfidf_dict_sent = self.m_sid2fid2tfidf_dict[sid]
+            for fid in fid2tfidf_dict_sent:
+                nid_f = fid2nid[fid]
+                tfidf_sent = fid2tfidf_dict_sent[fid]
+                G.add_edge(nid_f, nid_s, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
+                G.add_edge(nid_s, nid_f, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
+    
+        for i in range(user_node_num):
+            nid_u = list(nid2uid.keys())[0]
+            fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
+
+            for fid in fid2tfidf_dict_user:
+                if fid not in fid2nid:
+                    continue
+                nid_f = fid2nid[fid]
+                tfidf_user = fid2tfidf_dict_user[fid]
+                G.add_edge(nid_f, nid_u, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
+                G.add_edge(nid_u, nid_f, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
+
+        for i in range(item_node_num):
+            nid_i = list(nid2iid.keys())[0]
+            fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
+
+            for fid in fid2tfidf_dict_item:
+                if fid not in fid2nid:
+                    continue
+                nid_f = fid2nid[fid]
+                tfidf_item = fid2tfidf_dict_item[fid]
+                G.add_edge(nid_f, nid_i, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
+                G.add_edge(nid_i, nid_f, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
+        
+        G.set_e_initializer(dgl.init.zero_initializer)
+
+        label = np.zeros(sent_node_num)
+        soft_label_num = 4
+
+        if not self.m_eval_flag:
+            for soft_label_idx in range(soft_label_num):
+                labelid_list = [sid2nid[i]-feature_node_num for i in label_list[soft_label_idx]]
+                if len(labelid_list) == 0:
+                    continue
+
+                label[np.array(labelid_list)] = soft_label_idx
+
+        label_tensor = torch.LongTensor(label).unsqueeze(1)
+        
+        # G.nodes[list(nid2sid.keys())].data["gt_label"] = gt_label_tensor
+        G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
+
+        return G
 
     def f_save_graphs(self, output_dir):
         self.m_output_graph_dir = output_dir
@@ -692,6 +863,9 @@ class RATEBEER_TRAIN(RATEBEER):
             pool_idx = graph_idx%pool_num
             idx_list_pool[pool_idx].append(graph_idx)
 
+        # print(idx_list_pool)
+        # exit()
+        # map(self.f_save_a_graph, idx_list_pool)
         with Pool(pool_num) as p:
             p.map(self.f_save_a_graph, idx_list_pool)
         
@@ -705,9 +879,10 @@ class RATEBEER_TRAIN(RATEBEER):
             cdd_sid_list_i = self.m_cdd_sid_list_list[i]
             gt_label_sid_list_i = self.m_gt_label_sid_list_list[i]
 
-            g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
+            # g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
+            g_i = self.create_soft_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
 
-            gt_label_i = {"gt_label": torch.tensor(gt_label_sid_list_i)}
+            gt_label_i = {"gt_label": torch.tensor(gt_label_sid_list_i[-1])}
 
             g_file_i = self.m_output_graph_dir+str(i)+".bin"
             save_graphs(g_file_i, [g_i], gt_label_i)
@@ -1070,3 +1245,20 @@ class RATEBEER_TEST(RATEBEER):
 
             g_file_i = self.m_output_graph_dir+str(i)+".bin"
             save_graphs(g_file_i, [g_i], gt_label_i)
+
+### [0, 0.5)-->0
+### [0.5, 1.25)-->1
+### [1.25, 2)-->2
+### [2]-->3
+def get_softlabel(bleu_score):
+    soft_label = 0
+    if bleu_score < 0.5:
+        soft_label = 0
+    elif bleu_score < 1.25:
+        soft_label = 1
+    elif bleu_score < 2:
+        soft_label = 2
+    else:
+        soft_label = 3
+
+    return soft_label

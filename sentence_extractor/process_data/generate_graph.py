@@ -29,7 +29,8 @@ def main(args):
 
     s_time = datetime.now()
     if "beer" in args.data_name:
-        data_obj.f_load_ratebeer(args)
+        # data_obj.f_load_ratebeer(args)
+        data_obj.f_load_soft_ratebeer(args)
         # data_obj.f_load_ratebeer_resume(args)
 
     e_time = datetime.now()
