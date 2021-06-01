@@ -10,7 +10,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from loss import XE_LOSS, BPR_LOSS, SIG_LOSS
-from metric import get_example_recall_precision, compute_bleu, get_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu, get_sentence_bleu
 from model import GraphX
 # from infer_new import _INFER
 import random
@@ -328,10 +328,12 @@ class TRAINER(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
-                    bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    # bleu_scores_j = compute_bleu([hyps_j], [refs_j])
+                    bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
                     bleu_list.append(bleu_scores_j)
 
-                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
 
                     bleu_1_list.append(bleu_1_scores_j)
 
