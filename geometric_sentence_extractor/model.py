@@ -165,15 +165,17 @@ class GraphX(nn.Module):
 
         x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
+        # print("x", x)
 
         ## go through GAT
         #### hidden: node_num*hidden_size
-        print("x size", graph_batch.x.size())
+        # print("x size", graph_batch.x.size())
 
         hidden = self.m_gat(graph_batch.x, graph_batch.edge_index)
+        # print("hidden", hidden)
 
         hidden_batch, _ = to_dense_batch(hidden, graph_batch.batch)
-        print("hidden_batch size", hidden_batch.size())
+        # print("hidden_batch size", hidden_batch.size())
 
         hidden_s_batch = []
 
@@ -253,7 +255,7 @@ class GraphX(nn.Module):
         #### hidden: node_num*hidden_size
         hidden = self.m_gat(graph_batch.x, graph_batch.edge_index)
 
-        hidden_batch, mask_batch = hidden.to_dense_batch()
+        hidden_batch, mask_batch = to_dense_batch(hidden, graph_batch.batch)
 
         hidden_s_batch = []
         sid_batch = []
@@ -284,16 +286,16 @@ class GraphX(nn.Module):
             s_num = s_nid.size(0)
             pad_s_num = max_s_num_batch-s_num
 
+            #### sent_num*hidden_size
             hidden_s_g_i = hidden_g_i[s_nid]
-            pad_s_g_i = torch.zeros(pad_s_num, hidden_s_g_i.size(1)).to(self.m_device) 
-            hidden_pad_s_g_i = torch.cat([hidden_s_g_i, pad_s_g_i], dim=1)
+            pad_s_g_i = torch.zeros(pad_s_num, hidden_s_g_i.size(1)).to(self.m_device)
+            hidden_pad_s_g_i = torch.cat([hidden_s_g_i, pad_s_g_i], dim=0)
 
             hidden_s_batch.append(hidden_pad_s_g_i.unsqueeze(0))
 
             sid = g.s_rawid
             pad_sid_i = torch.zeros(pad_s_num).to(self.m_device)
-            sid_pad_i = torch.cat([sid, pad_sid_i], dim=-1)
-
+            sid_pad_i = torch.cat([sid, pad_sid_i], dim=0)
             sid_batch.append(sid_pad_i.unsqueeze(0))
 
             mask_s = torch.zeros(max_s_num_batch).to(self.m_device)
@@ -316,6 +318,6 @@ class GraphX(nn.Module):
         #### logits: batch_size*max_sen_num*1
         logits = self.wh(hidden_s_batch)
         logits = logits.squeeze(-1)
-        logits = F.sigmoid(logits, dim=-1)*mask_s_batch
+        logits = torch.sigmoid(logits)*mask_s_batch
 
         return logits, sid_batch, mask_s_batch, target_s_batch

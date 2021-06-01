@@ -91,7 +91,7 @@ class TRAINER(object):
                 print("++"*10, epoch, "++"*10)
 
                 s_time = datetime.datetime.now()
-                # self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
+                self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
                 print("validation epoch duration", e_time-s_time)
                     
@@ -170,7 +170,7 @@ class TRAINER(object):
 
         network.train()
         # exit()
-        print("train data", train_data)
+        # print("train data", train_data)
 
         for g_batch in train_data:
             # print("graph_batch", g_batch)
@@ -179,6 +179,7 @@ class TRAINER(object):
             
             graph_batch = g_batch.to(self.m_device)
             labels = graph_batch.label
+            labels = (labels == 3)
             # print("labels", labels.size())
             # exit()
             logits = network(graph_batch)
