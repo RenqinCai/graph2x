@@ -170,17 +170,20 @@ class TRAINER(object):
 
         network.train()
         # exit()
-        for graph_batch in train_data:
+        print("train data", train_data)
+
+        for g_batch in train_data:
+            # print("graph_batch", g_batch)
             # if i % self.m_print_interval == 0:
             #     print("... eval ... ", i)
             
-            # graph_batch = graph_batch.to(self.m_device)
-            exit()
+            graph_batch = g_batch.to(self.m_device)
             labels = graph_batch.label
-            
+            # print("labels", labels.size())
+            # exit()
             logits = network(graph_batch)
 
-            loss = self.m_rec_loss(logits, labels)
+            loss = self.m_rec_loss(logits, labels.float())
             loss = loss.mean()
 
             loss_list.append(loss.item())

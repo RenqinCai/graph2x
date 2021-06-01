@@ -402,9 +402,9 @@ class RATEBEER(Dataset):
 
         label_tensor = torch.LongTensor(label).unsqueeze(1)
 
-        x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
-        g = Data(x)   
-        
+        # x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
+        g = Data()   
+        g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
         g["f_nid"] = torch.LongTensor(list(nid2fid.keys()))
         g["f_rawid"] = torch.LongTensor(list(fid2nid.keys()))
 
@@ -922,8 +922,9 @@ class RATEBEER_TRAIN(RATEBEER):
 
         label_tensor = torch.LongTensor(label).unsqueeze(1)
 
-        x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
-        g = Data(x)   
+        # x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
+        g = Data()   
+        g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
         
         g["f_nid"] = torch.LongTensor(list(nid2fid.keys()))
         g["f_rawid"] = torch.LongTensor(list(fid2nid.keys()))

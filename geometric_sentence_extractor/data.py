@@ -9,8 +9,10 @@ import pandas as pd
 import argparse
 import pickle
 
-from torch.utils.data import dataset
+
+# from torch.utils.data import dataset
 # from torch.utils.data import DataLoader
+from torch_geometric.data import Dataset
 from torch_geometric.data import DataLoader
 
 # from movie import MOVIE, MOVIE_TEST
@@ -56,6 +58,8 @@ class DATA():
         train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=4)
 
         valid_loader = DataLoader(dataset=valid_data, batch_size=batch_size, shuffle=False, num_workers=4)
+
+        # print("train_loader", train_loader)
 
         return train_loader, valid_loader, vocab_obj
 

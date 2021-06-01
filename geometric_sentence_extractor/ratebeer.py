@@ -266,6 +266,6 @@ class RATEBEER(Dataset):
         g_file_i = self.m_graph_path+str(i)+".pt"
 
         g_i = torch.load(g_file_i)
-        print("gt_label", g_i.gt_label)
+        # print("gt_label", g_i.gt_label)
 
-        return g_i, i
+        return g_i
