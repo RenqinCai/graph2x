@@ -43,6 +43,7 @@ class TRAINER(object):
         # self.m_rec_loss = XE_LOSS(vocab_obj.item_num, self.m_device)
         # self.m_rec_loss = BPR_LOSS(self.m_device)
         self.m_rec_loss = SIG_LOSS(self.m_device)
+        self.m_rec_soft_loss = BPR_LOSS(self.m_device)
         # self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
         self.m_train_step = 0
@@ -53,6 +54,8 @@ class TRAINER(object):
         self.m_grad_clip = args.grad_clip
         self.m_weight_decay = args.weight_decay
         # self.m_l2_reg = args.l2_reg
+
+        self.m_soft_train = args.soft_label
 
         self.m_train_iteration = 0
         self.m_valid_iteration = 0
@@ -174,16 +177,17 @@ class TRAINER(object):
             #     print("... eval ... ", i)
             
             graph_batch = g_batch.to(self.m_device)
-            labels = graph_batch.label
-            labels = (labels == 3)
-
             logits = network(graph_batch)
 
-            loss = self.m_rec_loss(logits, labels.float())
-            loss = loss.mean()
+            labels = graph_batch.label
+            loss = None
+            if not self.m_soft_train:
+                labels = (labels == 3)
+                loss = self.m_rec_loss(logits, labels.float())
+            else:
+                loss = self.m_rec_soft_loss(graph_batch, logits, labels)
 
             loss_list.append(loss.item())
-            
             tmp_loss_list.append(loss.item())
 
             optimizer.zero_grad()
@@ -477,6 +481,16 @@ class TRAINER(object):
                     rouge_l_r_list.append(scores_j["rouge-l"]["r"])
                     rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
+                    bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
+                    bleu_list.append(bleu_scores_j)
+
+                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
+
+                    bleu_1_list.append(bleu_1_scores_j)
+                    bleu_2_list.append(bleu_2_scores_j)
+                    bleu_3_list.append(bleu_3_scores_j)
+                    bleu_4_list.append(bleu_4_scores_j)
+
             end_time = time.time()
             duration = end_time - start_time
             print("... one epoch", duration)
@@ -500,20 +514,20 @@ class TRAINER(object):
         self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
         self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
 
-        self.m_mean_eval_bleu = 0.0
-        # self.m_mean_eval_bleu = np.mean(bleu_list)
-        # self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
-        # self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
-        # self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
-        # self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
+        # self.m_mean_eval_bleu = 0.0
+        self.m_mean_eval_bleu = np.mean(bleu_list)
+        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
+        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
+        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
+        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
         # logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_eval_iteration, self.m_mean_eval_loss))
         logger_obj.f_add_output2IO("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f"%(self.m_mean_eval_rouge_1_f, self.m_mean_eval_rouge_1_p, self.m_mean_eval_rouge_1_r, self.m_mean_eval_rouge_2_f, self.m_mean_eval_rouge_2_p, self.m_mean_eval_rouge_2_r, self.m_mean_eval_rouge_l_f, self.m_mean_eval_rouge_l_p, self.m_mean_eval_rouge_l_r))
-        # logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
-        # logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
-        # logger_obj.f_add_output2IO("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
-        # logger_obj.f_add_output2IO("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
-        # logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
+        logger_obj.f_add_output2IO("bleu:%.4f"%(self.m_mean_eval_bleu))
+        logger_obj.f_add_output2IO("bleu-1:%.4f"%(self.m_mean_eval_bleu_1))
+        logger_obj.f_add_output2IO("bleu-2:%.4f"%(self.m_mean_eval_bleu_2))
+        logger_obj.f_add_output2IO("bleu-3:%.4f"%(self.m_mean_eval_bleu_3))
+        logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
         network.train()
 

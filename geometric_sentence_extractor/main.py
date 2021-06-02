@@ -126,6 +126,7 @@ if __name__ == "__main__":
 
 
     ### train
+    parser.add_argument('--soft_label', action="store_true", default=False)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--optimizer', type=str, default='Adam')
     parser.add_argument('--weight_decay', type=float, default=0.0)
