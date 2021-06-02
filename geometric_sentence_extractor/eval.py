@@ -149,30 +149,6 @@ class EVAL(object):
         # # draw the tsne clustering figure of item/feature embeddings
         # print("In tsne ... ")
 
-        # tsne_model = TSNE(perplexity=40, n_components=2, init='pca', n_iter=2500, random_state=23)
-        # print("Init tsne model ...")
-
-        # new_values = tsne_model.fit_transform(embeds_item)
-        # print("Finish fiting tsne!")
-
-        # x = []
-        # y = []
-        # for value in new_values:
-        #     x.append(value[0])
-        #     y.append(value[1])
-
-        # plt.figure(figsize=(16, 16))
-        # for i in range(len(x)):
-        #     plt.scatter(x[i], y[i])
-        #     plt.annotate(
-        #         labels_item[i],
-        #         xy=(x[i], y[i]),
-        #         xytext=(5, 2),
-        #         textcoords='offset points',
-        #         ha='right',
-        #         va='bottom')
-        # print("figure saved!")
-        # plt.savefig("item_embed_tsne_new.png")
         print("Finish clustering")
 
     def f_eval_new(self, train_data, eval_data):
@@ -219,284 +195,95 @@ class EVAL(object):
         self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
         # print(self.m_feture2fid)
 
+        i = 0
         self.m_network.eval()
         with torch.no_grad():
             print("Number of evaluation data: {}".format(len(eval_data)))
-            for i, (G, index) in enumerate(eval_data):
-                # eval_flag = random.randint(1,5)
-                # if eval_flag != 2:
-                # 	continue
-                if i % 20 == 0:
-                    print("... eval ... index: {}".format(i))
-                    # print(G)
 
-                # debug_index += 1
-                # if debug_index > 1:
-                #     break
+            for graph_batch in eval_data:
+                
+                if i % 100 == 0:
+                    print("... eval ... ", i)
+                i += 1
 
-                G = G.to(self.m_device)
+                graph_batch = graph_batch.to(self.m_device)
 
-                logits = self.m_network(G)
-                snode_id = G.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
-                labels = G.ndata["label"][snode_id]
+                #### logits: batch_size*max_sen_num
+                logits, sids, masks, target_sids = self.m_network.eval_forward(graph_batch)
+               
+                topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
+                
+                #### topk sentence index
+                #### pred_sids: batch_size*topk_sent
+                pred_sids = sids.gather(dim=1, index=topk_pred_snids)
 
-                labels = labels.float()
-                node_loss = self.m_criterion(logits, labels)
-                # print("node_loss", node_loss.size())
+                batch_size = logits.size(0)
 
-                G.nodes[snode_id].data["loss"] = node_loss
-                loss = dgl.sum_nodes(G, "loss")
-                loss = loss.mean()
+                top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
 
-                G.nodes[snode_id].data["p"] = logits
-                glist = dgl.unbatch(G)
+                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
-                # print("number of graphs in this batch: {}\n".format(len(glist)))
+                userid = graph_batch.u_rawid
+                itemid = graph_batch.i_rawid
 
-                for j in range(len(glist)):
-                    hyps_j = []
+                for j in range(batch_size):
                     refs_j = []
+                    hyps_j = []
 
-                    idx = index[j]
-                    example_j = eval_data.dataset.get_example(idx)
-                    label_sid_list_j = example_j["label_sid"]
+                    for sid_k in target_sids[j]:
+                        refs_j.append(self.m_sid2swords[sid_k.item()])
 
-                    g_j = glist[j]
-# <<<<<<< HEAD
-                    # snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"]==1)
-
-                    # """
-                    # get feature attn weight
-                    # """
-
-                    # for k in snode_id_j:
-                    #     predecessors = list(g_j.predecessors(k))
-                    #     edges_id = g_j.edge_ids(predecessors, k)
-                        
-
-                    # NOTE: sentence node: unit=0, dtype=1
-                    snode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)
-# >>>>>>> peng
-                    N = len(snode_id_j)
-                    # print("number of candidate sentence at this graph (i.e. for this user-item pair): {}".format(N))
-                    # This should be the logits of this sentence nodes (snode_id_j)
-                    p_sent_j = g_j.ndata["p"][snode_id_j]
-                    # print('p_sent_j shape: {}'.format(p_sent_j.shape))
-                    p_sent_j = p_sent_j.view(-1)
-                    p_sent_j = F.sigmoid(p_sent_j)
-
-                    # Get the top-k sentence as predicted sentences
-                    topk_j, pred_idx_j = torch.topk(p_sent_j, min(topk, N))
-                    pred_snode_id_j = snode_id_j[pred_idx_j]
-
-                    # Get the candidate top-k sentences to perform a sanity check
-                    topk_cand_j, pred_cand_idx_j = torch.topk(p_sent_j, min(topk_candidate, N))
-                    pred_cand_snode_id_j = snode_id_j[pred_cand_idx_j]
-
-                    # Get the candidate bottom-k sentences to preform a sanity check
-                    # NOTE: bottom_cand_j are still negative numbers
-                    bottomk_cand_j, pred_bottom_idx_j = torch.topk(-1*p_sent_j, min(topk_candidate, N))
-                    pred_bottom_snode_id_j = snode_id_j[pred_bottom_idx_j]
-                    proba_bottomk_cand_j = -1*bottomk_cand_j
-
-                    # print("topk_j", topk_j)
-                    # Need to get the label_snode_id
-                    labels_j = g_j.ndata["label"][snode_id_j]       # this should be an all-zero tensor
-
-                    # print("labels_j: ", labels_j.view(-1))
-                    # print("labels_j shape: {}".format(labels_j.shape))
-
-                    # Extract prediction (top3)
-                    # print("Number of nodes selected as prediction: {}".format(len(pred_snode_id_j)))
-                    pred_feature_j = []
-                    for cur_pred_snode_id_j in pred_snode_id_j:
-                        # print("sent node {0}'s successor: {1}".format(cur_pred_snode_id_j, g_j.successors(cur_pred_snode_id_j)))
-                        pred_fid_list_j = list()
-                        pred_feature_list_j = list()
-                        for pred_fnode_id_j in g_j.successors(cur_pred_snode_id_j):
-                            # get fid using the "raw_id"
-                            pred_fid_id_j = g_j.nodes[pred_fnode_id_j].data["raw_id"]
-                            pred_fid_list_j.append(pred_fid_id_j)
-                            # get featureid from the fid2feature mapping
-                            pred_featureid_id_j = self.m_fid2feature[pred_fid_id_j.item()]
-                            # get the feature content
-                            pred_feature_id_j = self.d_id2feature[pred_featureid_id_j]
-                            pred_feature_list_j.append(pred_feature_id_j)
-                        # print("Feature: {}".format(" & ".join(pred_feature_list_j)))
-                        pred_feature_j.extend(pred_feature_list_j)
-                        # add number of features into per sentence
-                        feature_num_per_sentence_pred.append(len(pred_feature_list_j))
-                    # add number of features per review
-                    feature_num_per_review_pred.append(len(pred_feature_j))
-
-                    # pred_idx_j = pred_idx_j.cpu().numpy()
-                    pred_sid_list_j = g_j.nodes[pred_snode_id_j].data["raw_id"]
-                    pred_logits_list_j = g_j.nodes[pred_snode_id_j].data["p"]
-
-                    # Extract Top predicted candidate sentences
-                    # print("Number of nodes ranking from top as prediction candidates: {}".format(len(pred_cand_idx_j)))
-                    candidate_sent2prob = dict()
-                    candidate_sent2features = dict()
-                    # from snode_id to sid
-                    pred_cand_sid_list_j = g_j.nodes[pred_cand_snode_id_j].data["raw_id"]
-                    # the proba of these sentences can be found from topk_cand_j
-                    assert len(topk_cand_j) == len(pred_cand_sid_list_j)
-                    assert len(pred_cand_snode_id_j) == len(pred_cand_sid_list_j)
-                    cand_sent_idx = 0
-                    for cur_pred_snode_cand_id_j in pred_cand_snode_id_j:
-                        # get feature of this sentence
-                        pred_cand_fid_list_j = list()
-                        pred_cand_feature_list_j = list()
-                        for pred_fnode_id_j in g_j.successors(cur_pred_snode_cand_id_j):
-                            pred_fid_id_j = g_j.nodes[pred_fnode_id_j].data["raw_id"]
-                            pred_cand_fid_list_j.append(pred_fid_id_j)
-                            # get featureid
-                            pred_featureid_id_j = self.m_fid2feature[pred_fid_id_j.item()]
-                            # get feature content
-                            pred_feature_id_j = self.d_id2feature[pred_featureid_id_j]
-                            # add feature to the list
-                            pred_cand_feature_list_j.append(pred_feature_id_j)
-                        """ fill in the dict
-                        1. get the content of this sentence
-                        2. get the probability of this sentence
-                        """
-                        # get the content of this sentence
-                        this_sid = pred_cand_sid_list_j[cand_sent_idx]
-                        this_sent_content = self.m_sid2swords[this_sid.item()]
-                        # get the probability of this sentence
-                        this_sent_proba = topk_cand_j[cand_sent_idx]
-                        assert this_sent_content not in candidate_sent2prob
-                        candidate_sent2prob[this_sent_content] = this_sent_proba
-                        candidate_sent2features[this_sent_content] = pred_cand_feature_list_j
-                        # counter update
-                        cand_sent_idx += 1
-
-                    # Extract Bottom predicted candidate sentences
-                    bottom_sent2prob = dict()
-                    bottom_sent2features = dict()
-                    # from snode_id to sid
-                    pred_bottom_sid_list_j = g_j.nodes[pred_bottom_snode_id_j].data["raw_id"]
-                    # the proba of these sentences can be found from proba_bottomk_cand_j (in ascending order)
-                    assert len(proba_bottomk_cand_j) == len(pred_bottom_sid_list_j)
-                    assert len(pred_bottom_sid_list_j) == len(pred_bottom_snode_id_j)
-                    bottom_sent_idx = 0
-                    for cur_pred_snode_cand_id_j in pred_bottom_snode_id_j:
-                        # get the feature of this sentence
-                        pred_bottom_fid_list_j = list()
-                        pred_bottom_feature_list_j = list()
-                        for pred_fnode_id_j in g_j.successors(cur_pred_snode_cand_id_j):
-                            pred_fid_id_j = g_j.nodes[pred_fnode_id_j].data['raw_id']
-                            pred_bottom_fid_list_j.append(pred_fid_id_j)
-                            # get featureid
-                            pred_featureid_id_j = self.m_fid2feature[pred_fid_id_j.item()]
-                            # get feature content
-                            pred_feature_id_j = self.d_id2feature[pred_featureid_id_j]
-                            # add feature to the list
-                            pred_bottom_feature_list_j.append(pred_feature_id_j)
-                        # 1. get the content of this sentence
-                        # 2. get the probability of this sentence
-                        # get the content of this sentence
-                        this_sid = pred_bottom_sid_list_j[bottom_sent_idx]
-                        this_sent_content = self.m_sid2swords[this_sid.item()]
-                        # get the probability of this sentence
-                        this_sent_proba = proba_bottomk_cand_j[bottom_sent_idx]
-                        assert this_sent_content not in bottom_sent2prob
-                        bottom_sent2prob[this_sent_content] = this_sent_proba
-                        bottom_sent2features[this_sent_content] = pred_bottom_feature_list_j
-                        # counter update
-                        bottom_sent_idx += 1
-
-                    # print("pred_logits_list_j", pred_logits_list_j)
-                    # exit()
-                    unode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"] == 2)
-                    uid_j = g_j.nodes[unode_id_j].data["raw_id"]
-                    true_user_id_j = self.m_uid2user[uid_j.item()]
-
-                    inode_id_j = g_j.filter_nodes(lambda nodes: nodes.data["dtype"] == 3)
-                    iid_j = g_j.nodes[inode_id_j].data["raw_id"]
-                    true_item_id_j = self.m_iid2item[iid_j.item()]
-
-                    recall_j, precision_j = get_example_recall_precision(
-                        pred_sid_list_j.cpu(), label_sid_list_j, min(topk, N))
-
-                    # recall_list.append(recall_j)
-                    # precision_list.append(precision_j)
-
-                    # for sid_k in label_sid_list_j:
-                    #     hyps_j.append(self.m_sid2swords[sid_k])
-
-                    # for sid_k in pred_sid_list_j:
-                    #     refs_j.append(self.m_sid2swords[sid_k.item()])
-
-                    # Get the ground-truth feature
-                    refs_feature_j = []
-                    for sid_k in label_sid_list_j:
-                        reference_sent = self.m_sid2swords[sid_k]
-                        refs_j.append(reference_sent)
-                        # get the feature of this sentence
-                        ref_sent_id = self.d_testsetsent2id[reference_sent]
-                        ref_sent_featureids = self.d_testsetsentid2feature[ref_sent_id].keys()
-                        ref_sent_features = []
-                        for ref_sent_fid in ref_sent_featureids:
-                            ref_sent_f = self.d_id2feature[ref_sent_fid]
-                            ref_sent_features.append(ref_sent_f)
-                        refs_feature_j.extend(ref_sent_features)
-                        # print("Ref feature: {}".format(" & ".join(ref_sent_features)))
-                        # add number of features per sentence
-                        feature_num_per_sentence_ref.append(len(ref_sent_features))
-                    # add number of features per review
-                    feature_num_per_review_ref.append(len(refs_feature_j))
-
-                    for sid_k in pred_sid_list_j:
+                    for sid_k in pred_sids[j]:
                         hyps_j.append(self.m_sid2swords[sid_k.item()])
-
-                    # compute recall score of features
-                    recall_f_j, precision_f_j = get_feature_recall_precision(pred_feature_j, refs_feature_j)
 
                     hyps_j = " ".join(hyps_j)
                     refs_j = " ".join(refs_j)
 
-                    # if uid_j.item() == 0:
-                    #     continue
+                    userid_j = userid[j]
+                    itemid_j = itemid[j]
 
                     with open('../result/eval_logging_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(true_user_id_j))
-                        f.write("item id: {}\n".format(true_item_id_j))
+                        f.write("user id: {}\n".format(userid_j))
+                        f.write("item id: {}\n".format(itemid_j))
                         f.write("hyps_j: {}\n".format(hyps_j))
                         f.write("refs_j: {}\n".format(refs_j))
-                        f.write("pred features: {}\n".format(" & ".join(pred_feature_j)))
-                        f.write("refs features: {}\n".format(" & ".join(refs_feature_j)))
-                        f.write("feature recall: {}\n".format(recall_f_j))
-                        f.write("feature precision: {}\n".format(precision_f_j))
                         f.write("========================================\n")
 
+                    top_cdd_hyps_j = []
+                    top_cdd_probs_j = top_cdd_logits
+                    for sid_k in top_cdd_pred_sids[j]:
+                        top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
+
                     with open('../result/eval_logging_top_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(true_user_id_j))
-                        f.write("item id: {}\n".format(true_item_id_j))
+                        f.write("user id: {}\n".format(userid_j))
+                        f.write("item id: {}\n".format(userid_j))
                         f.write("refs_j: {}\n".format(refs_j))
-                        for key, value in candidate_sent2prob.items():
+                        for k in len(topk_candidate):
                             # key is the sentence content
                             # value is the probability of this sentence
-                            f.write("candidate sentence: {}\n".format(key))
-                            f.write("proba: {}\n".format(value))
+                            f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
+                            f.write("prob: {}\n".format(top_cdd_probs_j[k].item()))
                             # also retrieve the feature of this sentence
-                            cur_fea_list = candidate_sent2features[key]
-                            f.write("feature: {}\n".format(" & ".join(cur_fea_list)))
+                            
                             f.write("----:----:----:----:----:----:----:----:\n")
                         f.write("========================================\n")
 
+                    bottom_cdd_hyps_j = []
+                    bottom_cdd_probs_j = bottom_cdd_logits
+                    for sid_k in bottom_cdd_pred_sids[j]:
+                        bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
+
                     with open('../result/eval_logging_bottom_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(true_user_id_j))
-                        f.write("item id: {}\n".format(true_item_id_j))
+                        f.write("user id: {}\n".format(userid_j))
+                        f.write("item id: {}\n".format(userid_j))
                         f.write("refs_j: {}\n".format(refs_j))
-                        for key, value in bottom_sent2prob.items():
+                        for k in len(topk_candidate):
                             # key is the sentence content
                             # value is the probability of this sentence
-                            f.write("candidate sentence: {}\n".format(key))
-                            f.write("proba: {}\n".format(value))
-                            # also retrieve the feature of this sentence
-                            cur_fea_list = bottom_sent2features[key]
-                            f.write("feature: {}\n".format(" & ".join(cur_fea_list)))
+                            f.write("candidate sentence: {}\n".format(bottom_cdd_hyps_j[k]))
+                            f.write("prob: {}\n".format(bottom_cdd_probs_j[k].item()))
                             f.write("----:----:----:----:----:----:----:----:\n")
                         f.write("========================================\n")
 
@@ -517,9 +304,6 @@ class EVAL(object):
                     # bleu_scores_j = compute_bleu([refs_j], [hyps_j])
                     bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
                     bleu_list.append(bleu_scores_j)
-
-                    feature_recall_list.append(recall_f_j)
-                    feature_precision_list.append(precision_f_j)
 
                     # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
                     bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
@@ -557,13 +341,13 @@ class EVAL(object):
         self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
         self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
-        self.m_recall_feature = np.mean(feature_recall_list)
-        self.m_precision_feature = np.mean(feature_precision_list)
+        # self.m_recall_feature = np.mean(feature_recall_list)
+        # self.m_precision_feature = np.mean(feature_precision_list)
 
-        self.m_mean_f_num_per_sent_pred = np.mean(feature_num_per_sentence_pred)
-        self.m_mean_f_num_per_sent_ref = np.mean(feature_num_per_sentence_ref)
-        self.m_mean_f_num_per_review_pred = np.mean(feature_num_per_review_pred)
-        self.m_mean_f_num_per_review_ref = np.mean(feature_num_per_review_ref)
+        # self.m_mean_f_num_per_sent_pred = np.mean(feature_num_per_sentence_pred)
+        # self.m_mean_f_num_per_sent_ref = np.mean(feature_num_per_sentence_ref)
+        # self.m_mean_f_num_per_review_pred = np.mean(feature_num_per_review_pred)
+        # self.m_mean_f_num_per_review_ref = np.mean(feature_num_per_review_ref)
 
         # print("NLL_loss:%.4f"%(self.m_mean_eval_loss))
         print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f" % (
@@ -581,16 +365,16 @@ class EVAL(object):
         print("bleu-2:%.4f" % (self.m_mean_eval_bleu_2))
         print("bleu-3:%.4f" % (self.m_mean_eval_bleu_3))
         print("bleu-4:%.4f" % (self.m_mean_eval_bleu_4))
-        print("feature recall: {}".format(self.m_recall_feature))
-        print("feature precision: {}".format(self.m_precision_feature))
-        print("feature num per sentence [pred]: {}".format(self.m_mean_f_num_per_sent_pred))
-        print("feature num per sentence [ref]: {}".format(self.m_mean_f_num_per_sent_ref))
-        print("feature num per review [pred]: {}".format(self.m_mean_f_num_per_review_pred))
-        print("feature num per review [ref]: {}".format(self.m_mean_f_num_per_review_ref))
-        print("total number of sentence [pred]: {}".format(len(feature_num_per_sentence_pred)))
-        print("total number of sentence [ref]: {}".format(len(feature_num_per_sentence_ref)))
-        print("total number of review [pred]: {}".format(len(feature_num_per_review_pred)))
-        print("total number of review [ref]: {}".format(len(feature_num_per_review_ref)))
+        # print("feature recall: {}".format(self.m_recall_feature))
+        # print("feature precision: {}".format(self.m_precision_feature))
+        # print("feature num per sentence [pred]: {}".format(self.m_mean_f_num_per_sent_pred))
+        # print("feature num per sentence [ref]: {}".format(self.m_mean_f_num_per_sent_ref))
+        # print("feature num per review [pred]: {}".format(self.m_mean_f_num_per_review_pred))
+        # print("feature num per review [ref]: {}".format(self.m_mean_f_num_per_review_ref))
+        # print("total number of sentence [pred]: {}".format(len(feature_num_per_sentence_pred)))
+        # print("total number of sentence [ref]: {}".format(len(feature_num_per_sentence_ref)))
+        # print("total number of review [pred]: {}".format(len(feature_num_per_review_pred)))
+        # print("total number of review [ref]: {}".format(len(feature_num_per_review_ref)))
 
         with open('../result/eval_metrics_{}.txt'.format(dataset_name), 'w') as f:
             print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n"%(
@@ -608,5 +392,5 @@ class EVAL(object):
             print("bleu-2:%.4f\n" % (self.m_mean_eval_bleu_2), file=f)
             print("bleu-3:%.4f\n" % (self.m_mean_eval_bleu_3), file=f)
             print("bleu-4:%.4f\n" % (self.m_mean_eval_bleu_4), file=f)
-            print("feature recall: {}\n".format(self.m_recall_feature), file=f)
-            print("feature precision: {}\n".format(self.m_precision_feature), file=f)
+            # print("feature recall: {}\n".format(self.m_recall_feature), file=f)
+            # print("feature precision: {}\n".format(self.m_precision_feature), file=f)
