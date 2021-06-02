@@ -128,11 +128,11 @@ class TRAINER(object):
                     print("last train loss %.4f"%last_train_loss, "cur train loss %.4f"%self.m_mean_train_loss)
                     last_train_loss = self.m_mean_train_loss
 
-                # if best_eval_bleu < self.m_mean_eval_bleu:
-                print("... saving model ...")
-                checkpoint = {'model':network.state_dict()}
-                self.f_save_model(checkpoint)
-                best_eval_bleu = self.m_mean_eval_bleu
+                if best_eval_bleu < self.m_mean_eval_bleu:
+                    print("... saving model ...")
+                    checkpoint = {'model':network.state_dict()}
+                    self.f_save_model(checkpoint)
+                    best_eval_bleu = self.m_mean_eval_bleu
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
@@ -143,11 +143,11 @@ class TRAINER(object):
             print("--"*20)
             print("... exiting from training early")
            
-            # if best_eval_recall < self.m_mean_eval_recall:
-            print("... final save ...")
-            checkpoint = {'model':network.state_dict()}
-            self.f_save_model(checkpoint)
-            best_eval_recall = self.m_mean_eval_recall
+            if best_eval_bleu < self.m_mean_eval_bleu:
+                print("... final save ...")
+                checkpoint = {'model':network.state_dict()}
+                self.f_save_model(checkpoint)
+                best_eval_bleu = self.m_mean_eval_bleu
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
