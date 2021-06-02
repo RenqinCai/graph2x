@@ -1,20 +1,16 @@
 import os
 import json
 import time
-from dgl.convert import graph
 import torch
 import argparse
 import numpy as np
 import datetime
 import torch.nn as nn
-from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from loss import XE_LOSS, BPR_LOSS, SIG_LOSS
 from metric import get_example_recall_precision, compute_bleu, get_bleu, get_sentence_bleu
 from model import GraphX
-# from infer_new import _INFER
 import random
-import dgl
 import torch.nn.functional as F
 from rouge import Rouge
 
@@ -180,8 +176,7 @@ class TRAINER(object):
             graph_batch = g_batch.to(self.m_device)
             labels = graph_batch.label
             labels = (labels == 3)
-            # print("labels", labels.size())
-            # exit()
+
             logits = network(graph_batch)
 
             loss = self.m_rec_loss(logits, labels.float())
@@ -440,7 +435,7 @@ class TRAINER(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 #### logits: batch_size*max_sen_num
-                logits, sids, masks, targets = network.eval_forward(graph_batch)
+                logits, sids, masks, target_sids = network.eval_forward(graph_batch)
                
                 # loss = self.m_rec_loss(glist)
                 # loss_list.append(loss.item())
@@ -459,7 +454,7 @@ class TRAINER(object):
                     refs_j = []
                     hyps_j = []
 
-                    for sid_k in targets[j]:
+                    for sid_k in target_sids[j]:
                         refs_j.append(self.m_sid2swords[sid_k.item()])
 
                     for sid_k in pred_sids[j]:

@@ -403,13 +403,18 @@ class RATEBEER(Dataset):
         label_tensor = torch.LongTensor(label).unsqueeze(1)
 
         # x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
+        # g = Data(x)   
+        
         g = Data()   
         g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
+
         g["f_nid"] = torch.LongTensor(list(nid2fid.keys()))
         g["f_rawid"] = torch.LongTensor(list(fid2nid.keys()))
+        g["f_num"] = torch.LongTensor([len(nid2fid)])
 
         g["s_nid"] = torch.LongTensor(list(nid2sid.keys()))
         g["s_rawid"] = torch.LongTensor(list(sid2nid.keys()))
+        g["s_num"] = torch.LongTensor([len(sid2nid)])
 
         g["u_nid"] = torch.LongTensor([feat_sent_node_num])
         g["u_rawid"] = torch.LongTensor([uid])
@@ -923,14 +928,18 @@ class RATEBEER_TRAIN(RATEBEER):
         label_tensor = torch.LongTensor(label).unsqueeze(1)
 
         # x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
+        # g = Data(x)   
+        
         g = Data()   
         g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
-        
+
         g["f_nid"] = torch.LongTensor(list(nid2fid.keys()))
         g["f_rawid"] = torch.LongTensor(list(fid2nid.keys()))
+        g["f_num"] = torch.LongTensor([len(nid2fid)])
 
         g["s_nid"] = torch.LongTensor(list(nid2sid.keys()))
         g["s_rawid"] = torch.LongTensor(list(sid2nid.keys()))
+        g["s_num"] = torch.LongTensor([len(nid2sid)])
 
         g["u_nid"] = torch.LongTensor([feat_sent_node_num])
         g["u_rawid"] = torch.LongTensor([uid])
