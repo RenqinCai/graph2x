@@ -10,7 +10,7 @@ class GATNET(torch.nn.Module):
         super(GATNET, self).__init__()
 
         self.gat_layer_1 = GATConv(in_dim, out_dim, heads=head_num, dropout=dropout_rate)
-
+        # default, concat all attention head
         self.gat_layer_2 = GATConv(head_num*out_dim, out_dim, heads=1, concat=False, dropout=dropout_rate)
     
     def forward(self, x, edge_index):
