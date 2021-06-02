@@ -1,3 +1,4 @@
+from dgl.convert import graph
 import numpy as np
 
 import torch
@@ -104,40 +105,6 @@ class GraphX(nn.Module):
         ## init node embeddings
         # print("graph_batch", graph_batch.num_graphs)
         batch_size = graph_batch.num_graphs
-        ##### feature node
-        # for g in graph_batch:
-        # for g_idx, g in enumerate(graph_batch):
-        # for i in range(batch_size):
-        #     g = graph_batch[i]
-        #     # print("g", g)
-        #     fid = g.f_rawid
-        #     f_embed = self.m_feature_embed(fid)
-        #     f_node_embed = self.feature_state_proj(f_embed)
-
-        #     ##### sentence node
-        #     sid = g.s_rawid
-        #     s_embed = self.m_sent_embed(sid)
-        #     s_node_embed = self.sent_state_proj(s_embed)
-
-        #     ##### item node
-        #     itemid = g.i_rawid
-        #     item_embed = self.m_item_embed(itemid)
-        #     item_node_embed = self.item_state_proj(item_embed)
-
-        #     ##### user node
-        #     userid = g.u_rawid
-        #     user_embed = self.m_user_embed(userid)
-        #     user_node_embed = self.user_state_proj(user_embed)
-
-        #     # print("f size", f_embed.size(), f_node_embed.size())
-        #     # print("s size", s_embed.size(), s_node_embed.size())
-        #     # print("item size", item_embed.size(), item_node_embed.size())
-        #     # print("user size", user_embed.size(), user_node_embed.size())
-
-        #     x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
-
-        #     g["x"] = x
-        #     print("g x", x.size(), g.x.size())
         
         fid = graph_batch.f_rawid
         f_embed = self.m_feature_embed(fid)
@@ -158,30 +125,60 @@ class GraphX(nn.Module):
         user_embed = self.m_user_embed(userid)
         user_node_embed = self.user_state_proj(user_embed)
 
-        # print("f size", f_embed.size(), f_node_embed.size())
-        # print("s size", s_embed.size(), s_node_embed.size())
-        # print("item size", item_embed.size(), item_node_embed.size())
-        # print("user size", user_embed.size(), user_node_embed.size())
+        # print("f_node_embed", f_node_embed.size())
+        # print("s_node_embed", s_node_embed.size())
+        # print("user_node_embed", user_node_embed.size())
+        # print("item_node_embed", item_node_embed.size())
 
-        x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
+        batch_fnum = graph_batch.f_num
+        batch_snum = graph_batch.s_num
+
+        batch_cumsum_fnum = torch.cumsum(batch_fnum, dim=0)
+        last_cumsum_fnum_i = 0
+
+        batch_cumsum_snum = torch.cumsum(batch_snum, dim=0)
+        last_cumsum_snum_i = 0
+
+        # batch_nnum = graph_batch.num_nodes
+        # print(batch_nnum)
+
+        x_batch = []
+        for i in range(batch_size):
+            cumsum_fnum_i = batch_cumsum_fnum[i]
+            x_batch.append(f_node_embed[last_cumsum_fnum_i:cumsum_fnum_i])
+            last_cumsum_fnum_i = cumsum_fnum_i
+
+            cumsum_snum_i = batch_cumsum_snum[i]
+            x_batch.append(s_node_embed[last_cumsum_snum_i:cumsum_snum_i])
+            last_cumsum_snum_i = cumsum_snum_i
+
+            x_batch.append(user_node_embed[i].unsqueeze(0))
+            x_batch.append(item_node_embed[i].unsqueeze(0))
+
+            nnum_i = graph_batch[i].num_nodes
+            debug_nnum_i = batch_fnum[i]+batch_snum[i]+2
+            assert nnum_i == debug_nnum_i, "error node num"
+            # print("debug", debug_nnum_i, nnum_i)
+        
+        x = torch.cat(x_batch, dim=0)
+      
+        # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
         # print("x", x)
 
         ## go through GAT
         #### hidden: node_num*hidden_size
-        # print("x size", graph_batch.x.size())
-
         hidden = self.m_gat(graph_batch.x, graph_batch.edge_index)
-        # print("hidden", hidden)
 
+        #### hidden_batch: batch_size*max_node_size_per_g*hidden_size
         hidden_batch, _ = to_dense_batch(hidden, graph_batch.batch)
-        # print("hidden_batch size", hidden_batch.size())
 
-        hidden_s_batch = []
+        ### list of sent_node_num*hidden_size
+        hidden_s = []
 
-        ## fetch sentence hidden vectors
+        ### speed up
+        ## fetch sentence hidden vectors from graph
         for batch_idx in range(batch_size):
-        # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]
             hidden_g_i = hidden_batch[batch_idx]
 
@@ -189,10 +186,13 @@ class GraphX(nn.Module):
 
             hidden_s_g_i = hidden_g_i[s_nid]
 
-            hidden_s_batch.append(hidden_s_g_i)
+            hidden_s.append(hidden_s_g_i)
 
-        hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
-        logits = self.wh(hidden_s_batch)
+        ### hidden_s_batch: s_node_num*hidden_size
+        hidden_s = torch.cat(hidden_s, dim=0)
+
+        ### logits: s_node_num*1
+        logits = self.wh(hidden_s)
 
         ### make predictions
 
@@ -202,25 +202,6 @@ class GraphX(nn.Module):
         ## init node embeddings
 
         ##### feature node
-        # for g_idx, g in enumerate(graph_batch):
-        #     fid = g.f_rawid
-        #     f_embed = self.m_feature_embed(fid)
-
-        #     ##### sentence node
-        #     sid = g.s_rawid
-        #     s_embed = self.m_sent_embed(sid)
-
-        #     ##### item node
-        #     itemid = g.i_rawid
-        #     item_embed = self.m_item_embed(itemid)
-
-        #     ##### user node
-        #     userid = g.u_rawid
-        #     user_embed = self.m_user_embed(userid)
-
-        #     x = torch.cat([f_embed, s_embed, item_embed, user_embed], dim=0)
-
-        #     g["x"] = x
         
         batch_size = graph_batch.num_graphs
 
@@ -243,24 +224,45 @@ class GraphX(nn.Module):
         user_embed = self.m_user_embed(userid)
         user_node_embed = self.user_state_proj(user_embed)
 
-        # print("f size", f_embed.size(), f_node_embed.size())
-        # print("s size", s_embed.size(), s_node_embed.size())
-        # print("item size", item_embed.size(), item_node_embed.size())
-        # print("user size", user_embed.size(), user_node_embed.size())
+        batch_fnum = graph_batch.f_num
+        batch_snum = graph_batch.s_num
 
-        x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
+        batch_cumsum_fnum = torch.cumsum(batch_fnum, dim=0)
+        last_cumsum_fnum_i = 0
+
+        batch_cumsum_snum = torch.cumsum(batch_snum, dim=0)
+        last_cumsum_snum_i = 0
+
+        x_batch = []
+        for i in range(batch_size):
+            cumsum_fnum_i = batch_cumsum_fnum[i]
+            x_batch.append(f_node_embed[last_cumsum_fnum_i:cumsum_fnum_i])
+            last_cumsum_fnum_i = cumsum_fnum_i
+
+            cumsum_snum_i = batch_cumsum_snum[i]
+            x_batch.append(s_node_embed[last_cumsum_snum_i:cumsum_snum_i])
+            last_cumsum_snum_i = cumsum_snum_i
+
+            x_batch.append(user_node_embed[i].unsqueeze(0))
+            x_batch.append(item_node_embed[i].unsqueeze(0))
+            
+        x = torch.cat(x_batch, dim=0)
+
+        # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
 
         ## go through GAT
         #### hidden: node_num*hidden_size
         hidden = self.m_gat(graph_batch.x, graph_batch.edge_index)
 
+        #### hidden_batch: batch_size*max_node_size_per_g*hidden_size
         hidden_batch, mask_batch = to_dense_batch(hidden, graph_batch.batch)
 
+        ### list of 1*max_sent_node_num_per_g*hidden_size
         hidden_s_batch = []
         sid_batch = []
         mask_s_batch = []
-        target_s_batch = []
+        target_sid_batch = []
 
         max_s_num_batch = 0
         for batch_idx in range(batch_size):
@@ -274,9 +276,6 @@ class GraphX(nn.Module):
             max_s_num_batch = max(max_s_num_batch, s_num)
 
         ## fetch sentence hidden vectors
-        # for g_idx, g in enumerate(graph_batch):
-        #     hidden_g_i = hidden_batch[g_idx]
-
         for batch_idx in range(batch_size):
         # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]
@@ -290,9 +289,9 @@ class GraphX(nn.Module):
             hidden_s_g_i = hidden_g_i[s_nid]
             pad_s_g_i = torch.zeros(pad_s_num, hidden_s_g_i.size(1)).to(self.m_device)
             hidden_pad_s_g_i = torch.cat([hidden_s_g_i, pad_s_g_i], dim=0)
-
             hidden_s_batch.append(hidden_pad_s_g_i.unsqueeze(0))
 
+            #### change pad id 
             sid = g.s_rawid
             pad_sid_i = torch.zeros(pad_s_num).to(self.m_device)
             sid_pad_i = torch.cat([sid, pad_sid_i], dim=0)
@@ -302,10 +301,11 @@ class GraphX(nn.Module):
             mask_s[:s_num] = 1
             mask_s_batch.append(mask_s.unsqueeze(0))
 
+            ### change gt_label: gt sent raw id
             target_sid = g.gt_label
-            target_s_batch.append(target_sid)
+            target_sid_batch.append(target_sid)
 
-        #### hidden_s_batch: batch_size*max_sen_num*hidden_size
+        #### hidden_s_batch: batch_size*max_s_num_batch*hidden_size
         hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
         
         ### sid_batch: batch_size*max_s_num_batch
@@ -315,9 +315,9 @@ class GraphX(nn.Module):
         mask_s_batch = torch.cat(mask_s_batch, dim=0)
 
         ### make predictions
-        #### logits: batch_size*max_sen_num*1
+        #### logits: batch_size*max_s_num_batch*1
         logits = self.wh(hidden_s_batch)
         logits = logits.squeeze(-1)
         logits = torch.sigmoid(logits)*mask_s_batch
 
-        return logits, sid_batch, mask_s_batch, target_s_batch
+        return logits, sid_batch, mask_s_batch, target_sid_batch
