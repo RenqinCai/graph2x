@@ -222,7 +222,8 @@ class EVAL(object):
                 top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
                 top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
 
-                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                reverse_logits = (1-logits)*masks
+                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
                 bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
                 userid = graph_batch.u_rawid
