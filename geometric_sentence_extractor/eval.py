@@ -222,7 +222,8 @@ class EVAL(object):
                 top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
                 top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
 
-                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                reverse_logits = (1-logits)*masks
+                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
                 bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
                 userid = graph_batch.u_rawid
@@ -252,7 +253,7 @@ class EVAL(object):
                         f.write("========================================\n")
 
                     top_cdd_hyps_j = []
-                    top_cdd_probs_j = top_cdd_logits
+                    top_cdd_probs_j = top_cdd_logits[j]
                     for sid_k in top_cdd_pred_sids[j]:
                         top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
 
@@ -260,7 +261,7 @@ class EVAL(object):
                         f.write("user id: {}\n".format(userid_j))
                         f.write("item id: {}\n".format(userid_j))
                         f.write("refs_j: {}\n".format(refs_j))
-                        for k in len(topk_candidate):
+                        for k in range(topk_candidate):
                             # key is the sentence content
                             # value is the probability of this sentence
                             f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
@@ -271,7 +272,7 @@ class EVAL(object):
                         f.write("========================================\n")
 
                     bottom_cdd_hyps_j = []
-                    bottom_cdd_probs_j = bottom_cdd_logits
+                    bottom_cdd_probs_j = 1-bottom_cdd_logits[j]
                     for sid_k in bottom_cdd_pred_sids[j]:
                         bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
 
@@ -279,7 +280,7 @@ class EVAL(object):
                         f.write("user id: {}\n".format(userid_j))
                         f.write("item id: {}\n".format(userid_j))
                         f.write("refs_j: {}\n".format(refs_j))
-                        for k in len(topk_candidate):
+                        for k in range(topk_candidate):
                             # key is the sentence content
                             # value is the probability of this sentence
                             f.write("candidate sentence: {}\n".format(bottom_cdd_hyps_j[k]))
