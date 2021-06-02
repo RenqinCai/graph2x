@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from rouge import Rouge
 
 
-
 class TRAINER(object):
 
     def __init__(self, vocab_obj, args, device):
@@ -84,7 +83,7 @@ class TRAINER(object):
         best_eval_recall = 0
         best_eval_bleu = 0
         # self.f_init_word_embed(pretrain_word_embed, network)
-        try: 
+        try:
             for epoch in range(self.m_epochs):
                 
                 print("++"*10, epoch, "++"*10)
@@ -142,7 +141,7 @@ class TRAINER(object):
         except KeyboardInterrupt:
             print("--"*20)
             print("... exiting from training early")
-           
+
             # if best_eval_recall < self.m_mean_eval_recall:
             print("... final save ...")
             checkpoint = {'model':network.state_dict()}
@@ -214,7 +213,7 @@ class TRAINER(object):
         end_time = time.time()
         print("+++ duration +++", end_time-start_time)
         self.m_mean_train_loss = np.mean(loss_list)
-    
+
     def f_eval_train_epoch(self, eval_data, network, optimizer, logger_obj):
         loss_list = []
         recall_list = []
@@ -440,7 +439,7 @@ class TRAINER(object):
 
                 #### logits: batch_size*max_sen_num
                 logits, sids, masks, target_sids = network.eval_forward(graph_batch)
-               
+
                 # loss = self.m_rec_loss(glist)
                 # loss_list.append(loss.item())
 
@@ -497,7 +496,7 @@ class TRAINER(object):
 
             # logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
-                
+
         # self.m_mean_eval_loss = np.mean(loss_list)
         # self.m_mean_eval_recall = np.mean(recall_list)
         # self.m_mean_eval_precision = np.mean(precision_list)
@@ -530,4 +529,3 @@ class TRAINER(object):
         logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
         network.train()
-
