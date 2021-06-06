@@ -31,11 +31,14 @@ class GraphX(nn.Module):
         print("total sent num", self.m_total_sent_num)
         print("train sent num", self.m_train_sent_num)
 
+        self.m_feature_finetune_flag = args.feat_finetune
+        self.m_sentence_finetune_flag = args.sent_finetune
+
         self.m_user_embed = nn.Embedding(self.m_user_num, args.user_embed_size)
         self.m_item_embed = nn.Embedding(self.m_item_num, args.item_embed_size)
 
         self.m_feature_embed = nn.Embedding(self.m_feature_num, args.feature_embed_size)
-
+        
         # self.m_feature_embed = vocab_obj.m_fid2fembed
         self.m_feature_embed_size = args.feature_embed_size
         self.f_load_feature_embedding(vocab_obj.m_fid2fembed)
@@ -44,7 +47,7 @@ class GraphX(nn.Module):
         # self.m_sent_embed = vocab_obj.m_sid2sembed
         self.m_sent_embed_size = args.sent_embed_size
         self.f_load_sent_embedding(vocab_obj.m_sid2sembed)
-
+       
         self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size, bias=False)
         self.feature_state_proj = nn.Linear(args.feature_embed_size, args.hidden_size, bias=False)
         self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
@@ -82,7 +85,9 @@ class GraphX(nn.Module):
             pre_feature_embed_weight.append(feature_embed_i)
 
         self.m_feature_embed.weight.data.copy_(torch.Tensor(pre_feature_embed_weight))
-        self.m_feature_embed.weight.requires_grad = False
+        
+        if not self.m_feature_finetune_flag:
+            self.m_feature_embed.weight.requires_grad = False
 
     def f_load_sent_embedding(self, pre_sent_embed):
 
@@ -99,7 +104,8 @@ class GraphX(nn.Module):
         print("sent num", self.m_train_sent_num)
 
         self.m_sent_embed.weight.data.copy_(torch.Tensor(pre_sent_embed_weight))
-        self.m_sent_embed.weight.requires_grad = False
+        if not self.m_sentence_finetune_flag:
+            self.m_sent_embed.weight.requires_grad = False
 
     def forward(self, graph_batch):
         ## init node embeddings
