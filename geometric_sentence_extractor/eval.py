@@ -19,7 +19,9 @@ from rouge import Rouge
 import dgl
 import pickle
 
-dataset_name = 'small_500'
+dataset_name = 'medium_500'
+label_format = 'soft_label'
+use_blocking = True
 
 
 class EVAL(object):
@@ -47,11 +49,14 @@ class EVAL(object):
         self.m_device = device
         self.m_model_path = args.model_path
 
+        print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
+
         # need to load some mappings
         id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
         feature2id_file = '../../Dataset/ratebeer/{}/train/feature/feature2id.json'.format(dataset_name)
         testset_sent2id_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2id.json'.format(dataset_name)
-        testset_sentid2feature_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2feature.json'.format(dataset_name)
+        # testset_sentid2feature_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2feature.json'.format(dataset_name)
+        trainset_useritem_pair_file = '../../Dataset/ratebeer/{}/train/useritem_pairs.json'.format(dataset_name)
         with open(id2feature_file, 'r') as f:
             print("Load file: {}".format(id2feature_file))
             self.d_id2feature = json.load(f)
@@ -61,9 +66,12 @@ class EVAL(object):
         with open(testset_sent2id_file, 'r') as f:
             print("Load file: {}".format(testset_sent2id_file))
             self.d_testsetsent2id = json.load(f)
-        with open(testset_sentid2feature_file, 'r') as f:
-            print("Load file: {}".format(testset_sentid2feature_file))
-            self.d_testsetsentid2feature = json.load(f)
+        # with open(testset_sentid2feature_file, 'r') as f:
+        #     print("Load file: {}".format(testset_sentid2feature_file))
+        #     self.d_testsetsentid2feature = json.load(f)
+        with open(trainset_useritem_pair_file, 'r') as f:
+            print("Load file: {}".format(trainset_useritem_pair_file))
+            self.d_trainset_useritempair = json.load(f)
 
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
@@ -195,61 +203,104 @@ class EVAL(object):
         self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
         # print(self.m_feture2fid)
 
-        i = 0
+        cnt_useritem_batch = 0
+        train_test_overlap_cnt = 0
+        train_test_differ_cnt = 0
         self.m_network.eval()
         with torch.no_grad():
             print("Number of evaluation data: {}".format(len(eval_data)))
 
             for graph_batch in eval_data:
-                
-                if i % 100 == 0:
-                    print("... eval ... ", i)
-                i += 1
+
+                if cnt_useritem_batch % 10 == 0:
+                    print("... eval ... ", cnt_useritem_batch)
+                cnt_useritem_batch += 1
 
                 graph_batch = graph_batch.to(self.m_device)
 
-                #### logits: batch_size*max_sen_num
+                # logits: batch_size*max_sen_num
                 logits, sids, masks, target_sids = self.m_network.eval_forward(graph_batch)
-               
-                topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
-                
-                #### topk sentence index
-                #### pred_sids: batch_size*topk_sent
-                pred_sids = sids.gather(dim=1, index=topk_pred_snids)
-
                 batch_size = logits.size(0)
 
-                top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
-                top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
-
-                reverse_logits = (1-logits)*masks
-                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
-                bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
+                if use_blocking:
+                    # use n-gram blocking
+                    # get all the sentence content
+                    batch_sents_content = []
+                    assert len(sids) == logits.size(0)      # this is the batch size
+                    for i in range(batch_size):
+                        cur_sents_content = []
+                        assert len(sids[i]) == len(sids[0])
+                        for cur_sid in sids[i]:
+                            cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
+                        batch_sents_content.append(cur_sents_content)
+                    assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
+                    # 1. get the top-k predicted sentences which form the hypothesis
+                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(batch_sents_content, logits, n_win=3, k=3)
+                    ngram_block_pred_snids = ngram_block_pred_snids.to(self.m_device)
+                    pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
+                    topk_logits = ngram_block_pred_proba
+                    # 2. get the top-20 predicted sentences' content and proba
+                    top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(batch_sents_content, logits, n_win=3, k=topk_candidate)
+                    top_cdd_pred_snids = top_cdd_pred_snids.to(self.m_device)
+                    top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
+                    # 3. get the bottom-20 predicted sentences' content and proba
+                    reverse_logits = (1-logits)*masks
+                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                    bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
+                else:
+                    # 1. get the top-k predicted sentences which form the hypothesis
+                    topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
+                    # topk sentence index
+                    # pred_sids: shape: (batch_size, topk_sent)
+                    pred_sids = sids.gather(dim=1, index=topk_pred_snids)
+                    # 2. get the top-20 predicted sentences' content and proba
+                    top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                    top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
+                    # 3. get the bottom-20 predicted sentences' content and proba
+                    reverse_logits = (1-logits)*masks
+                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                    bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
                 userid = graph_batch.u_rawid
                 itemid = graph_batch.i_rawid
 
                 for j in range(batch_size):
-                    refs_j = []
-                    hyps_j = []
+                    refs_j_list = []
+                    hyps_j_list = []
 
                     for sid_k in target_sids[j]:
-                        refs_j.append(self.m_sid2swords[sid_k.item()])
+                        refs_j_list.append(self.m_sid2swords[sid_k.item()])
 
                     for sid_k in pred_sids[j]:
-                        hyps_j.append(self.m_sid2swords[sid_k.item()])
+                        hyps_j_list.append(self.m_sid2swords[sid_k.item()])
 
-                    hyps_j = " ".join(hyps_j)
-                    refs_j = " ".join(refs_j)
+                    hyps_j = " ".join(hyps_j_list)
+                    refs_j = " ".join(refs_j_list)
 
-                    userid_j = userid[j]
-                    itemid_j = itemid[j]
+                    userid_j = userid[j].item()
+                    itemid_j = itemid[j].item()
+                    # get the true user/item id
+                    true_userid_j = self.m_uid2user[userid_j]
+                    true_itemid_j = self.m_iid2item[itemid_j]
+                    # check whether this user-item pair appears in the trainset
+                    if true_userid_j in self.d_trainset_useritempair:
+                        if true_itemid_j in self.d_trainset_useritempair[true_userid_j]:
+                            # this user-item pair already appeared in the trainset, ignore this user-item pair.
+                            train_test_overlap_cnt += 1
+                            continue
+                        else:
+                            train_test_differ_cnt += 1
+                    else:
+                        raise Exception("user: {} not in trainset but in testset!".format(true_userid_j))
 
-                    with open('../result/eval_logging_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(userid_j))
-                        f.write("item id: {}\n".format(itemid_j))
+                    with open('../result/eval_logging_{0}_{1}.txt'.format(dataset_name, label_format), 'a') as f:
+                        f.write("user id: {}\n".format(true_userid_j))
+                        f.write("item id: {}\n".format(true_itemid_j))
                         f.write("hyps_j: {}\n".format(hyps_j))
                         f.write("refs_j: {}\n".format(refs_j))
+                        f.write("probas: {}\n".format(topk_logits[j]))
+                        if use_blocking:
+                            f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
                         f.write("========================================\n")
 
                     top_cdd_hyps_j = []
@@ -257,9 +308,9 @@ class EVAL(object):
                     for sid_k in top_cdd_pred_sids[j]:
                         top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
 
-                    with open('../result/eval_logging_top_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(userid_j))
-                        f.write("item id: {}\n".format(userid_j))
+                    with open('../result/eval_logging_top_{0}_{1}.txt'.format(dataset_name, label_format), 'a') as f:
+                        f.write("user id: {}\n".format(true_userid_j))
+                        f.write("item id: {}\n".format(true_itemid_j))
                         f.write("refs_j: {}\n".format(refs_j))
                         for k in range(topk_candidate):
                             # key is the sentence content
@@ -267,7 +318,6 @@ class EVAL(object):
                             f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
                             f.write("prob: {}\n".format(top_cdd_probs_j[k].item()))
                             # also retrieve the feature of this sentence
-                            
                             f.write("----:----:----:----:----:----:----:----:\n")
                         f.write("========================================\n")
 
@@ -276,9 +326,9 @@ class EVAL(object):
                     for sid_k in bottom_cdd_pred_sids[j]:
                         bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
 
-                    with open('../result/eval_logging_bottom_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(userid_j))
-                        f.write("item id: {}\n".format(userid_j))
+                    with open('../result/eval_logging_bottom_{0}_{1}.txt'.format(dataset_name, label_format), 'a') as f:
+                        f.write("user id: {}\n".format(true_userid_j))
+                        f.write("item id: {}\n".format(true_itemid_j))
                         f.write("refs_j: {}\n".format(refs_j))
                         for k in range(topk_candidate):
                             # key is the sentence content
@@ -323,6 +373,8 @@ class EVAL(object):
 
                 # exit()
                 # break
+
+        assert len(rouge_1_f_list) == train_test_differ_cnt
 
         self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
         self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
@@ -377,7 +429,7 @@ class EVAL(object):
         # print("total number of review [pred]: {}".format(len(feature_num_per_review_pred)))
         # print("total number of review [ref]: {}".format(len(feature_num_per_review_ref)))
 
-        with open('../result/eval_metrics_{}.txt'.format(dataset_name), 'w') as f:
+        with open('../result/eval_metrics_{0}_{1}.txt'.format(dataset_name, label_format), 'w') as f:
             print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n"%(
                 self.m_mean_eval_rouge_1_f,
                 self.m_mean_eval_rouge_1_p,
@@ -395,3 +447,67 @@ class EVAL(object):
             print("bleu-4:%.4f\n" % (self.m_mean_eval_bleu_4), file=f)
             # print("feature recall: {}\n".format(self.m_recall_feature), file=f)
             # print("feature precision: {}\n".format(self.m_precision_feature), file=f)
+            print("Total number of user-item on testset (not appear in trainset): {}\n".format(train_test_differ_cnt), file=f)
+            print("Total number of user-item on testset (appear in trainset): {}\n".format(train_test_overlap_cnt), file=f)
+
+    def ngram_blocking(self, sents, p_sent, n_win, k):
+        """ ngram blocking
+        :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
+        :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
+        :param n_win:   ngram window size, i.e. which n-gram we are using. n_win can be 2,3,4,...
+        :param k:       we are selecting the top-k sentences
+
+        :return:        selected index of sids
+        """
+        batch_size = p_sent.size(0)
+        batch_select_idx = []
+        # TODO: Also return the probability(i.e. logit) of the selected sentences
+        batch_select_proba = []
+        batch_select_rank = []
+        assert len(sents) == len(p_sent)
+        assert len(sents) == batch_size
+        assert len(sents[0]) == len(p_sent[0])
+        # print(sents)
+        # print("batch size (sents): {}".format(len(sents)))
+        for i in range(len(sents)):
+            # print(len(sents[i]))
+            assert len(sents[i]) == len(sents[0])
+            assert len(sents[i]) == len(p_sent[i])
+        # print(p_sent)
+        # print(p_sent.shape)
+        for batch_idx in range(batch_size):
+            ngram_list = []
+            _, sorted_idx = p_sent[batch_idx].sort(descending=True)
+            select_idx = []
+            select_proba = []
+            select_rank = []
+            idx_rank = 0
+            for idx in sorted_idx:
+                idx_rank += 1
+                try:
+                    cur_sent = sents[batch_idx][idx]
+                except:
+                    print("i: {0} \t idx: {1}".format(batch_idx, idx))
+                cur_tokens = cur_sent.split()
+                overlap_flag = False
+                cur_sent_ngrams = []
+                for i in range(len(cur_tokens)-n_win+1):
+                    this_ngram = " ".join(cur_tokens[i:(i+n_win)])
+                    if this_ngram in ngram_list:
+                        overlap_flag = True
+                        break
+                    else:
+                        cur_sent_ngrams.append(this_ngram)
+                if not overlap_flag:
+                    select_idx.append(idx)
+                    select_proba.append(p_sent[batch_idx][idx])
+                    select_rank.append(idx_rank)
+                    ngram_list.extend(cur_sent_ngrams)
+                    if len(select_idx) >= k:
+                        break
+            batch_select_idx.append(select_idx)
+            batch_select_proba.append(select_proba)
+            batch_select_rank.append(select_rank)
+        # convert list to torch tensor
+        batch_select_idx = torch.LongTensor(batch_select_idx)
+        return batch_select_idx, batch_select_proba, batch_select_rank
