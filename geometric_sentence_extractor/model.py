@@ -58,7 +58,9 @@ class GraphX(nn.Module):
         # self.output_hidden_size = args.output_hidden_size
         # self.wh = nn.Linear(self.output_hidden_size * 2, 2)
         # self.wh = nn.Linear(args.hidden_size, 2)
-        self.wh = nn.Linear(args.hidden_size, 1)
+        self.sent_output = nn.Linear(args.hidden_size, 1)
+
+        self.feat_output = nn.Linear(args.hidden_size, 1)
 
         self.f_initialize()
 
@@ -73,7 +75,9 @@ class GraphX(nn.Module):
         nn.init.uniform_(self.user_state_proj.weight, a=-1e-3, b=1e-3)
         nn.init.uniform_(self.item_state_proj.weight, a=-1e-3, b=1e-3)
 
-        nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
+        # nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
+        nn.init.uniform_(self.sent_output.weight, a=-1e-3, b=1e-3)
+        nn.init.uniform_(self.feat_output.weight, a=-1e-3, b=1e-3)
 
     def f_load_feature_embedding(self, pre_feature_embed):
 
@@ -182,6 +186,8 @@ class GraphX(nn.Module):
         ### list of sent_node_num*hidden_size
         hidden_s = []
 
+        hidden_f = []
+
         ### speed up
         ## fetch sentence hidden vectors from graph
         for batch_idx in range(batch_size):
@@ -189,20 +195,24 @@ class GraphX(nn.Module):
             hidden_g_i = hidden_batch[batch_idx]
 
             s_nid = g.s_nid
-
             hidden_s_g_i = hidden_g_i[s_nid]
-
             hidden_s.append(hidden_s_g_i)
 
-        ### hidden_s_batch: s_node_num*hidden_size
-        hidden_s = torch.cat(hidden_s, dim=0)
-
-        ### logits: s_node_num*1
-        logits = self.wh(hidden_s)
+            f_nid = g.f_nid
+            hidden_f_g_i = hidden_g_i[f_nid]
+            hidden_f.append(hidden_f_g_i)
 
         ### make predictions
 
-        return logits
+        ### hidden_s_batch: s_node_num*hidden_size
+        hidden_s = torch.cat(hidden_s, dim=0)
+        ### logits: s_node_num*1
+        logits_s = self.sent_output(hidden_s)
+
+        hidden_f = torch.cat(hidden_f, dim=0)
+        logits_f = self.feat_output(hidden_f)
+
+        return logits_s, logits_f
 
     def eval_forward(self, graph_batch):
         ## init node embeddings
@@ -322,7 +332,7 @@ class GraphX(nn.Module):
 
         ### make predictions
         #### logits: batch_size*max_s_num_batch*1
-        logits = self.wh(hidden_s_batch)
+        logits = self.sent_output(hidden_s_batch)
         logits = logits.squeeze(-1)
         logits = torch.sigmoid(logits)*mask_s_batch
 

@@ -157,19 +157,23 @@ class TRAINER(object):
             print(" done !!!")
 
     def f_train_epoch(self, train_data, network, optimizer, logger_obj):
+        
+        loss_s_list = []
+        loss_f_list = []
         loss_list = []
 
         iteration = 0
 
         logger_obj.f_add_output2IO(" "*10+"training the user and item encoder"+" "*10)
-
+        
+        tmp_loss_s_list = []
+        tmp_loss_f_list = []
         tmp_loss_list = []
 
         start_time = time.time()
 
         network.train()
-        # exit()
-        # print("train data", train_data)
+        feat_loss_weight = 1.0
 
         for g_batch in train_data:
             # print("graph_batch", g_batch)
@@ -177,15 +181,27 @@ class TRAINER(object):
             #     print("... eval ... ", i)
             
             graph_batch = g_batch.to(self.m_device)
-            logits = network(graph_batch)
+            logits_s, logits_f = network(graph_batch)
 
-            labels = graph_batch.label
+            labels_s = graph_batch.s_label
             loss = None
+            loss_s = None
             if not self.m_soft_train:
                 labels = (labels == 3)
-                loss = self.m_rec_loss(logits, labels.float())
+                loss_s = self.m_rec_loss(logits_s, labels_s.float())
             else:
-                loss = self.m_rec_soft_loss(graph_batch, logits, labels)
+                loss_s = self.m_rec_soft_loss(graph_batch, logits_s, labels_s)
+
+            labels_f = graph_batch.f_label
+            loss_f = self.m_rec_loss(logits_f, labels_f.float())
+
+            loss = loss_s + feat_loss_weight*loss_f
+
+            loss_s_list.append(loss_s.item())
+            tmp_loss_s_list.append(loss_s.item())
+
+            loss_f_list.append(loss_f.item())
+            tmp_loss_f_list.append(loss_f.item())
 
             loss_list.append(loss.item())
             tmp_loss_list.append(loss.item())
@@ -204,12 +220,16 @@ class TRAINER(object):
             iteration += 1
             if iteration % self.m_print_interval == 0:
             # if iteration % 5 == 0:
-                logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(iteration, np.mean(tmp_loss_list)))
+                logger_obj.f_add_output2IO("%d, loss:%.4f, sent loss:%.4f, weighted feat loss:%.4f, feat loss:%.4f"%(iteration, np.mean(tmp_loss_list), np.mean(tmp_loss_s_list), feat_loss_weight*np.mean(tmp_loss_f_list), np.mean(tmp_loss_f_list)))
 
                 tmp_loss_list = []
+                tmp_loss_s_list = []
+                tmp_loss_f_list = []
 
-        logger_obj.f_add_output2IO("%d, NLL_loss:%.4f"%(self.m_train_iteration, np.mean(loss_list)))
+        logger_obj.f_add_output2IO("%d, loss:%.4f, sent loss:%.4f, weighted feat loss:%.4f, feat loss:%.4f"%(self.m_train_iteration, np.mean(loss_list), np.mean(loss_s_list), feat_loss_weight*np.mean(loss_f_list), np.mean(loss_f_list)))
         logger_obj.f_add_scalar2tensorboard("train/loss", np.mean(loss_list), self.m_train_iteration)
+        logger_obj.f_add_scalar2tensorboard("train/sent_loss", np.mean(loss_s_list), self.m_train_iteration)
+        logger_obj.f_add_scalar2tensorboard("train/feat_loss", np.mean(loss_f_list), self.m_train_iteration)
 
         end_time = time.time()
         print("+++ duration +++", end_time-start_time)
