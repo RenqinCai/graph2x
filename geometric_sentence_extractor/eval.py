@@ -16,12 +16,14 @@ import datetime
 import statistics
 from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_sentence_bleu
 from rouge import Rouge
+from nltk.translate import bleu_score
 import dgl
 import pickle
 
 dataset_name = 'medium_500'
 label_format = 'soft_label'
-use_blocking = True
+use_blocking = False             # whether using 3-gram blocking or not
+use_filtering = False             # whether using bleu score based filtering or not
 
 
 class EVAL(object):
@@ -247,6 +249,31 @@ class EVAL(object):
                     reverse_logits = (1-logits)*masks
                     bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
+                elif use_filtering:
+                    # use bleu-based filtering
+                    # get all the sentence content
+                    batch_sents_content = []
+                    assert len(sids) == logits.size(0)      # this is the batch size
+                    for i in range(batch_size):
+                        cur_sents_content = []
+                        assert len(sids[i]) == len(sids[0])
+                        for cur_sid in sids[i]:
+                            cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
+                        batch_sents_content.append(cur_sents_content)
+                    assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
+                    # 1. get the top-k predicted sentences which form the hypothesis
+                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.bleu_filtering(batch_sents_content, logits, k=3, filter_value=0.25)
+                    ngram_block_pred_snids = ngram_block_pred_snids.to(self.m_device)
+                    pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
+                    topk_logits = ngram_block_pred_proba
+                    # 2. get the top-20 predicted sentences' content and proba
+                    top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(batch_sents_content, logits, k=topk_candidate, filter_value=0.25)
+                    top_cdd_pred_snids = top_cdd_pred_snids.to(self.m_device)
+                    top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
+                    # 3. get the bottom-20 predicted sentences' content and proba
+                    reverse_logits = (1-logits)*masks
+                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                    bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
                 else:
                     # 1. get the top-k predicted sentences which form the hypothesis
                     topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
@@ -300,6 +327,8 @@ class EVAL(object):
                         f.write("refs_j: {}\n".format(refs_j))
                         f.write("probas: {}\n".format(topk_logits[j]))
                         if use_blocking:
+                            f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
+                        elif use_filtering:
                             f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
                         f.write("========================================\n")
 
@@ -461,7 +490,6 @@ class EVAL(object):
         """
         batch_size = p_sent.size(0)
         batch_select_idx = []
-        # TODO: Also return the probability(i.e. logit) of the selected sentences
         batch_select_proba = []
         batch_select_rank = []
         assert len(sents) == len(p_sent)
@@ -505,6 +533,73 @@ class EVAL(object):
                     ngram_list.extend(cur_sent_ngrams)
                     if len(select_idx) >= k:
                         break
+            batch_select_idx.append(select_idx)
+            batch_select_proba.append(select_proba)
+            batch_select_rank.append(select_rank)
+        # convert list to torch tensor
+        batch_select_idx = torch.LongTensor(batch_select_idx)
+        return batch_select_idx, batch_select_proba, batch_select_rank
+
+    def bleu_filtering(self, sents, p_sent, k, filter_value=0.25):
+        """ bleu filtering
+        :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
+        :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
+        :param k:       we are selecting the top-k sentences
+        :param filter_value: the boundary value of bleu-2 + bleu-3 that defines whether we should filter a sentence
+
+        :return:        selected index of sids
+        """
+        batch_size = p_sent.size(0)
+        batch_select_idx = []
+        batch_select_proba = []
+        batch_select_rank = []
+        assert len(sents) == len(p_sent)
+        assert len(sents[0]) == len(p_sent[0])
+        for i in range(len(sents)):
+            assert len(sents[i]) == len(sents[0])
+            assert len(sents[i]) == len(p_sent[i])
+        for batch_idx in range(batch_size):
+            _, sorted_idx = p_sent[batch_idx].sort(descending=True)
+            select_idx = []
+            select_proba = []
+            select_rank = []
+            select_sents = []
+            idx_rank = 0
+            for idx in sorted_idx:
+                idx_rank += 1
+                try:
+                    cur_sent = sents[batch_idx][idx]
+                except:
+                    print("Error! batch: {0} \t idx: {1}".format(batch_idx, idx))
+                if len(select_sents) == 0:
+                    # add current sentence into the selected sentences
+                    select_sents.append(cur_sent)
+                    select_idx.append(idx)
+                    select_proba.append(p_sent[batch_idx][idx])
+                    select_rank.append(idx_rank)
+                    if len(select_idx) >= k:
+                        break
+                else:
+                    # compute bleu score
+                    this_ref_sents = []
+                    for this_sent in select_sents:
+                        this_ref_sents.append(this_sent.split())
+                    this_hypo_sent = cur_sent.split()
+                    sf = bleu_score.SmoothingFunction()
+                    bleu_1 = bleu_score.sentence_bleu(
+                        this_ref_sents, this_hypo_sent,smoothing_function=sf.method1, weights=[1.0, 0.0, 0.0, 0.0])
+                    bleu_2 = bleu_score.sentence_bleu(
+                        this_ref_sents, this_hypo_sent,smoothing_function=sf.method1, weights=[0.5, 0.5, 0.0, 0.0])
+                    bleu_3 = bleu_score.sentence_bleu(
+                        this_ref_sents, this_hypo_sent,smoothing_function=sf.method1, weights=[1.0/3, 1.0/3, 1.0/3, 0.0])
+                    if (bleu_2 + bleu_3) < filter_value:
+                        # add current sentence into the selected sentences
+                        select_sents.append(cur_sent)
+                        select_idx.append(idx)
+                        select_proba.append(p_sent[batch_idx][idx])
+                        select_rank.append(idx_rank)
+                        if len(select_idx) >= k:
+                            break
             batch_select_idx.append(select_idx)
             batch_select_proba.append(select_proba)
             batch_select_rank.append(select_rank)
