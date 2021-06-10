@@ -141,6 +141,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--feat_finetune', action='store_true', default=False)
     parser.add_argument('--sent_finetune', action='store_true', default=False)
+    parser.add_argument('--multi_task', action='store_true', default=False)
 
 
     ### hyper-param

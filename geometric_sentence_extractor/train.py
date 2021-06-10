@@ -55,6 +55,7 @@ class TRAINER(object):
         # self.m_l2_reg = args.l2_reg
 
         self.m_soft_train = args.soft_label
+        self.m_multi_task = args.multi_task
 
         self.m_train_iteration = 0
         self.m_valid_iteration = 0
@@ -189,20 +190,35 @@ class TRAINER(object):
                 loss_s = self.m_rec_loss(logits_s, labels_s.float())
             else:
                 loss_s = self.m_rec_soft_loss(graph_batch, logits_s, labels_s)
-
-            labels_f = graph_batch.f_label
-            loss_f = self.m_rec_loss(logits_f, labels_f.float())
-
-            loss = loss_s + feat_loss_weight*loss_f
-
-            loss_s_list.append(loss_s.item())
-            tmp_loss_s_list.append(loss_s.item())
-
-            loss_f_list.append(loss_f.item())
-            tmp_loss_f_list.append(loss_f.item())
-
-            loss_list.append(loss.item())
-            tmp_loss_list.append(loss.item())
+            
+            if self.m_multi_task:
+                labels_f = graph_batch.f_label
+                loss_f = self.m_rec_loss(logits_f, labels_f.float())
+                # multi-task loss, sum of sentence loss and feature loss
+                loss = loss_s + feat_loss_weight*loss_f
+                # add current sentence prediction loss
+                loss_s_list.append(loss_s.item())
+                tmp_loss_s_list.append(loss_s.item())
+                # add current feature prediction loss
+                loss_f_list.append(loss_f.item())
+                tmp_loss_f_list.append(loss_f.item())
+                # add current loss
+                loss_list.append(loss.item())
+                tmp_loss_list.append(loss.item())
+            else:
+                # loss from feature prediction
+                labels_f = graph_batch.f_label
+                loss_f = self.m_rec_loss(logits_f, labels_f.float())
+                loss = loss_s
+                # add current sentence prediction loss
+                loss_s_list.append(loss_s.item())
+                tmp_loss_s_list.append(loss_s.item())
+                # add current feature prediction loss
+                loss_f_list.append(loss_f.item())
+                tmp_loss_f_list.append(loss_f.item())
+                # add current loss
+                loss_list.append(loss.item())
+                tmp_loss_list.append(loss.item())
 
             optimizer.zero_grad()
             loss.backward()
