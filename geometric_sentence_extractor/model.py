@@ -38,7 +38,7 @@ class GraphX(nn.Module):
         self.m_item_embed = nn.Embedding(self.m_item_num, args.item_embed_size)
 
         self.m_feature_embed = nn.Embedding(self.m_feature_num, args.feature_embed_size)
-        
+
         # self.m_feature_embed = vocab_obj.m_fid2fembed
         self.m_feature_embed_size = args.feature_embed_size
         self.f_load_feature_embedding(vocab_obj.m_fid2fembed)
@@ -47,7 +47,7 @@ class GraphX(nn.Module):
         # self.m_sent_embed = vocab_obj.m_sid2sembed
         self.m_sent_embed_size = args.sent_embed_size
         self.f_load_sent_embedding(vocab_obj.m_sid2sembed)
-       
+
         self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size, bias=False)
         self.feature_state_proj = nn.Linear(args.feature_embed_size, args.hidden_size, bias=False)
         self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
@@ -60,7 +60,7 @@ class GraphX(nn.Module):
         # self.wh = nn.Linear(args.hidden_size, 2)
         self.sent_output = nn.Linear(args.hidden_size, 1)
 
-        self.feat_output = nn.Linear(args.hidden_size, 1)
+        # self.feat_output = nn.Linear(args.hidden_size, 1)
 
         self.f_initialize()
 
@@ -77,7 +77,7 @@ class GraphX(nn.Module):
 
         # nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
         nn.init.uniform_(self.sent_output.weight, a=-1e-3, b=1e-3)
-        nn.init.uniform_(self.feat_output.weight, a=-1e-3, b=1e-3)
+        # nn.init.uniform_(self.feat_output.weight, a=-1e-3, b=1e-3)
 
     def f_load_feature_embedding(self, pre_feature_embed):
 
@@ -171,7 +171,7 @@ class GraphX(nn.Module):
             # print("debug", debug_nnum_i, nnum_i)
         
         x = torch.cat(x_batch, dim=0)
-      
+
         # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
         # print("x", x)
@@ -186,7 +186,7 @@ class GraphX(nn.Module):
         ### list of sent_node_num*hidden_size
         hidden_s = []
 
-        hidden_f = []
+        # hidden_f = []
 
         ### speed up
         ## fetch sentence hidden vectors from graph
@@ -198,9 +198,9 @@ class GraphX(nn.Module):
             hidden_s_g_i = hidden_g_i[s_nid]
             hidden_s.append(hidden_s_g_i)
 
-            f_nid = g.f_nid
-            hidden_f_g_i = hidden_g_i[f_nid]
-            hidden_f.append(hidden_f_g_i)
+            # f_nid = g.f_nid
+            # hidden_f_g_i = hidden_g_i[f_nid]
+            # hidden_f.append(hidden_f_g_i)
 
         ### make predictions
 
@@ -209,10 +209,11 @@ class GraphX(nn.Module):
         ### logits: s_node_num*1
         logits_s = self.sent_output(hidden_s)
 
-        hidden_f = torch.cat(hidden_f, dim=0)
-        logits_f = self.feat_output(hidden_f)
+        # hidden_f = torch.cat(hidden_f, dim=0)
+        # logits_f = self.feat_output(hidden_f)
 
-        return logits_s, logits_f
+        # return logits_s, logits_f
+        return logits_s
 
     def eval_forward(self, graph_batch):
         ## init node embeddings
