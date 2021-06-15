@@ -10,6 +10,28 @@ import collections
 import math
 from nltk.translate import bleu_score
 from rouge_score import rouge_scorer
+from sklearn import metrics
+
+def get_recall_precision_f1(preds, targets, topk=26):
+
+    fpr, tpr, thresholds = metrics.roc_curve(targets, preds, pos_label=2)
+    auc = metrics.auc(fpr, tpr)
+
+    _, topk_preds = torch.topk(preds, topk, dim=0)
+
+    topk_preds = F.one_hot(topk_preds, num_classes=targets.size(0))
+    T = (topk_preds == targets)
+    P = (topk_preds == 1)
+
+    TP = sum(T*P)
+
+    precision = TP/topk
+
+    recall = TP/sum(targets)
+
+    f1 = 2*precision*recall/(precision+recall)
+    
+    return precision, recall, f1, auc
 
 
 def get_feature_recall_precision(pred, ref):

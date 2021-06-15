@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_sentence_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_recall_precision_f1, get_sentence_bleu
 from rouge import Rouge
 import dgl
 import pickle
@@ -153,9 +153,14 @@ class EVAL(object):
 
     def f_eval_new(self, train_data, eval_data):
 
-        recall_list = []
-        precision_list = []
-        F1_list = []
+        # recall_list = []
+        # precision_list = []
+        # F1_list = []
+
+        f_recall_list = []
+        f_precision_list = []
+        f_F1_list = []
+        f_auc_list = []
 
         rouge_1_f_list = []
         rouge_1_p_list = []
@@ -209,25 +214,34 @@ class EVAL(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 #### logits: batch_size*max_sen_num
-                logits, sids, masks, target_sids = self.m_network.eval_forward(graph_batch)
-               
-                topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
+                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
+
+                topk_logits, topk_pred_snids = torch.topk(s_logits, topk, dim=1)
                 
                 #### topk sentence index
                 #### pred_sids: batch_size*topk_sent
                 pred_sids = sids.gather(dim=1, index=topk_pred_snids)
 
-                batch_size = logits.size(0)
+                batch_size = s_logits.size(0)
 
-                top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                top_cdd_logits, top_cdd_pred_snids = torch.topk(s_logits, topk_candidate, dim=1)
                 top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
 
-                reverse_logits = (1-logits)*masks
-                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                reverse_s_logits = (1-s_logits)*s_masks
+                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_candidate, dim=1)
                 bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
                 userid = graph_batch.u_rawid
                 itemid = graph_batch.i_rawid
+
+                f_num = []
+
+                for j in range(batch_size):
+                    g = graph_batch[j]
+                    f_num.append(sum(g.f_label))
+
+                print(np.mean(f_num))
+
 
                 for j in range(batch_size):
                     refs_j = []
@@ -321,8 +335,22 @@ class EVAL(object):
                     # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
                     bleu_4_list.append(bleu_4_scores_j)
 
-                # exit()
-                # break
+                    ### get feature prediction performance
+                    # f_logits, fids, f_masks, target_f_labels
+                    f_logits_j = f_logits[j]
+                    fid_j = fids[j]
+                    mask_f_j = f_masks[j]
+                    target_f_labels_j = target_f_labels[j]
+
+                    f_num_j = target_f_labels_j.size(0)
+                    mask_f_logits_j = f_logits_j[:f_num_j]
+                    
+                    f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1(mask_f_logits_j, target_f_labels_j)
+                    f_precision_list.append(f_prec_j)
+                    f_recall_list.append(f_recall_j)
+                    f_F1_list.append(f_f1_j)
+                    f_auc_list.append(f_auc_j)
+
 
         self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
         self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
@@ -341,6 +369,13 @@ class EVAL(object):
         self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
         self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
         self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
+
+        self.m_mean_f_precision = np.mean(f_precision_list)
+        self.m_mean_f_recall = np.mean(f_recall_list)
+        self.m_mean_f_f1 = np.mean(f_F1_list)
+        self.m_mean_f_auc = np.mean(f_auc_list)
+
+        print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f"%(self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc))
 
         # self.m_recall_feature = np.mean(feature_recall_list)
         # self.m_precision_feature = np.mean(feature_precision_list)
