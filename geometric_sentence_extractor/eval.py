@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_sentence_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_recall_precision_f1, get_sentence_bleu
 from rouge import Rouge
 from nltk.translate import bleu_score
 import dgl
@@ -191,9 +191,14 @@ class EVAL(object):
 
     def f_eval_new(self, train_data, eval_data):
 
-        recall_list = []
-        precision_list = []
-        F1_list = []
+        # recall_list = []
+        # precision_list = []
+        # F1_list = []
+
+        f_recall_list = []
+        f_precision_list = []
+        f_F1_list = []
+        f_auc_list = []
 
         rouge_1_f_list = []
         rouge_1_p_list = []
@@ -251,8 +256,8 @@ class EVAL(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 # logits: batch_size*max_sen_num
-                logits, sids, masks, target_sids = self.m_network.eval_forward(graph_batch)
-                batch_size = logits.size(0)
+                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
+                batch_size = s_logits.size(0)
 
                 # Save the predict logits and sids
                 if save_predict:
@@ -262,12 +267,12 @@ class EVAL(object):
                         current_result_dict = {}
                         current_result_dict['user_id'] = userid_batch[i].item()
                         current_result_dict['item_id'] = itemid_batch[i].item()
-                        assert len(logits[i]) == len(sids[i])
-                        assert len(logits[i]) == len(masks[i])
+                        assert len(s_logits[i]) == len(sids[i])
+                        assert len(s_logits[i]) == len(s_masks[i])
                         triple_data_list = []
-                        for pos in range(len(logits[i])):
+                        for pos in range(len(s_logits[i])):
                             triple_data_list.append(
-                                [logits[i][pos].item(), sids[i][pos].item(), masks[i][pos].item()])
+                                [s_logits[i][pos].item(), sids[i][pos].item(), s_masks[i][pos].item()])
                         current_result_dict['predict_data'] = triple_data_list
                         current_target_sent_sids = []
                         for this_sid in target_sids[i]:
@@ -289,12 +294,12 @@ class EVAL(object):
                         # current_result_dict = {}
                         # current_result_dict['user_id'] = self.m_uid2user[userid_batch[i].item()]
                         # current_result_dict['item_id'] = self.m_iid2item[itemid_batch[i].item()]
-                        assert len(logits[i]) == len(sids[i])
-                        assert len(logits[i]) == len(masks[i])
+                        assert len(s_logits[i]) == len(sids[i])
+                        assert len(s_logits[i]) == len(s_masks[i])
                         current_cdd_sent_sids = []
                         current_target_sent_sids = []
-                        for pos in range(len(logits[i])):
-                            if masks[i][pos].item() == 1:
+                        for pos in range(len(s_logits[i])):
+                            if s_masks[i][pos].item() == 1:
                                 current_cdd_sent_sids.append(sids[i][pos].item())
                         for this_sid in target_sids[i]:
                             current_target_sent_sids.append(this_sid.item())
@@ -353,7 +358,7 @@ class EVAL(object):
                     # use n-gram blocking
                     # get all the sentence content
                     batch_sents_content = []
-                    assert len(sids) == logits.size(0)      # this is the batch size
+                    assert len(sids) == s_logits.size(0)      # this is the batch size
                     for i in range(batch_size):
                         cur_sents_content = []
                         assert len(sids[i]) == len(sids[0])
@@ -361,25 +366,25 @@ class EVAL(object):
                             cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
                         batch_sents_content.append(cur_sents_content)
                     assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
-                    masked_logits = (logits.cpu()+1)*masks.cpu()-1
+                    masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
                     # 1. get the top-k predicted sentences which form the hypothesis
-                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(batch_sents_content, masked_logits, n_win=3, k=3)
+                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(batch_sents_content, masked_s_logits, n_win=3, k=3)
                     ngram_block_pred_snids = ngram_block_pred_snids.to(self.m_device)
                     pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
                     topk_logits = ngram_block_pred_proba
                     # 2. get the top-20 predicted sentences' content and proba
-                    top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(batch_sents_content, masked_logits, n_win=3, k=topk_candidate)
+                    top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(batch_sents_content, masked_s_logits, n_win=3, k=topk_candidate)
                     top_cdd_pred_snids = top_cdd_pred_snids.to(self.m_device)
                     top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
                     # 3. get the bottom-20 predicted sentences' content and proba
-                    reverse_logits = (1-masked_logits)*masks.cpu()
-                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                    reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
                 elif use_filtering:
                     # use bleu-based filtering
                     # get all the sentence content
                     batch_sents_content = []
-                    assert len(sids) == logits.size(0)      # this is the batch size
+                    assert len(sids) == s_logits.size(0)      # this is the batch size
                     for i in range(batch_size):
                         cur_sents_content = []
                         assert len(sids[i]) == len(sids[0])
@@ -387,39 +392,47 @@ class EVAL(object):
                             cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
                         batch_sents_content.append(cur_sents_content)
                     assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
-                    masked_logits = (logits.cpu()+1)*masks.cpu()-1
+                    masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
                     # 1. get the top-k predicted sentences which form the hypothesis
-                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.bleu_filtering(batch_sents_content, masked_logits, k=3, filter_value=bleu_filter_value)
-                    ngram_block_pred_snids = ngram_block_pred_snids.to(self.m_device)
-                    pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
-                    topk_logits = ngram_block_pred_proba
+                    bleu_filter_pred_snids, bleu_filter_pred_proba, bleu_filter_pred_rank = self.bleu_filtering(batch_sents_content, masked_s_logits, k=3, filter_value=bleu_filter_value)
+                    bleu_filter_pred_snids = bleu_filter_pred_snids.to(self.m_device)
+                    pred_sids = sids.gather(dim=1, index=bleu_filter_pred_snids)
+                    topk_logits = bleu_filter_pred_proba
                     # 2. get the top-20 predicted sentences' content and proba
-                    top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(batch_sents_content, masked_logits, k=topk_candidate, filter_value=bleu_filter_value)
+                    top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(batch_sents_content, masked_s_logits, k=topk_candidate, filter_value=bleu_filter_value)
                     top_cdd_pred_snids = top_cdd_pred_snids.to(self.m_device)
                     top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
                     # 3. get the bottom-20 predicted sentences' content and proba
-                    reverse_logits = (1-masked_logits)*masks.cpu()
-                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                    reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
                 else:
                     # incase some not well-trained model will predict the logits for all sentences as 0.0, we apply masks on it
-                    masked_logits = (logits.cpu()+1)*masks.cpu()-1
+                    masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
                     # 1. get the top-k predicted sentences which form the hypothesis
-                    topk_logits, topk_pred_snids = torch.topk(masked_logits, topk, dim=1)
+                    topk_logits, topk_pred_snids = torch.topk(masked_s_logits, topk, dim=1)
                     # topk sentence index
                     # pred_sids: shape: (batch_size, topk_sent)
                     sids = sids.cpu()
                     pred_sids = sids.gather(dim=1, index=topk_pred_snids)
                     # 2. get the top-20 predicted sentences' content and proba
-                    top_cdd_logits, top_cdd_pred_snids = torch.topk(masked_logits, topk_candidate, dim=1)
+                    top_cdd_logits, top_cdd_pred_snids = torch.topk(masked_s_logits, topk_candidate, dim=1)
                     top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
                     # 3. get the bottom-20 predicted sentences' content and proba
-                    reverse_logits = (1-masked_logits)*masks.cpu()
-                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
+                    reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+                    bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
                 userid = graph_batch.u_rawid
                 itemid = graph_batch.i_rawid
+
+                f_num = []
+
+                for j in range(batch_size):
+                    g = graph_batch[j]
+                    f_num.append(sum(g.f_label))
+
+                print(np.mean(f_num))
 
                 for j in range(batch_size):
                     refs_j_list = []
@@ -460,7 +473,7 @@ class EVAL(object):
                         if use_blocking:
                             f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
                         elif use_filtering:
-                            f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
+                            f.write("rank: {}\n".format(bleu_filter_pred_rank[j]))
                         f.write("========================================\n")
 
                     top_cdd_hyps_j = []
@@ -531,8 +544,22 @@ class EVAL(object):
                     # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
                     bleu_4_list.append(bleu_4_scores_j)
 
-                # exit()
-                # break
+                    ### get feature prediction performance
+                    # f_logits, fids, f_masks, target_f_labels
+                    f_logits_j = f_logits[j]
+                    fid_j = fids[j]
+                    mask_f_j = f_masks[j]
+                    target_f_labels_j = target_f_labels[j]
+
+                    f_num_j = target_f_labels_j.size(0)
+                    mask_f_logits_j = f_logits_j[:f_num_j]
+                    
+                    f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1(mask_f_logits_j, target_f_labels_j)
+                    f_precision_list.append(f_prec_j)
+                    f_recall_list.append(f_recall_j)
+                    f_F1_list.append(f_f1_j)
+                    f_auc_list.append(f_auc_j)
+
 
             # assert len(rouge_1_f_list) == train_test_differ_cnt
 
@@ -561,6 +588,14 @@ class EVAL(object):
         #     self.m_mean_num_sents_per_target_review = np.mean(num_sents_per_target_review)
         #     print("Number of sentences for each target review (on average): {}".format(
         #         self.m_mean_num_sents_per_target_review))
+
+        self.m_mean_f_precision = np.mean(f_precision_list)
+        self.m_mean_f_recall = np.mean(f_recall_list)
+        self.m_mean_f_f1 = np.mean(f_F1_list)
+        self.m_mean_f_auc = np.mean(f_auc_list)
+
+        print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
+            self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc))
 
         # self.m_recall_feature = np.mean(feature_recall_list)
         # self.m_precision_feature = np.mean(feature_precision_list)
@@ -599,6 +634,8 @@ class EVAL(object):
 
         metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(dataset_name, label_format))
         with open(metric_log_file, 'w') as f:
+            print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f \n" % (
+                self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc), file=f)
             print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n"%(
                 self.m_mean_eval_rouge_1_f,
                 self.m_mean_eval_rouge_1_p,
@@ -730,11 +767,11 @@ class EVAL(object):
                     this_hypo_sent = cur_sent.split()
                     sf = bleu_score.SmoothingFunction()
                     bleu_1 = bleu_score.sentence_bleu(
-                        this_ref_sents, this_hypo_sent,smoothing_function=sf.method1, weights=[1.0, 0.0, 0.0, 0.0])
+                        this_ref_sents, this_hypo_sent, smoothing_function=sf.method1, weights=[1.0, 0.0, 0.0, 0.0])
                     bleu_2 = bleu_score.sentence_bleu(
-                        this_ref_sents, this_hypo_sent,smoothing_function=sf.method1, weights=[0.5, 0.5, 0.0, 0.0])
+                        this_ref_sents, this_hypo_sent, smoothing_function=sf.method1, weights=[0.5, 0.5, 0.0, 0.0])
                     bleu_3 = bleu_score.sentence_bleu(
-                        this_ref_sents, this_hypo_sent,smoothing_function=sf.method1, weights=[1.0/3, 1.0/3, 1.0/3, 0.0])
+                        this_ref_sents, this_hypo_sent, smoothing_function=sf.method1, weights=[1.0/3, 1.0/3, 1.0/3, 0.0])
                     if (bleu_2 + bleu_3) < filter_value:
                         # add current sentence into the selected sentences
                         select_sents.append(cur_sent)

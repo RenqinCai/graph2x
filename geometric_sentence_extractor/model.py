@@ -279,8 +279,14 @@ class GraphX(nn.Module):
         sid_batch = []
         mask_s_batch = []
         target_sid_batch = []
-
         max_s_num_batch = 0
+
+        hidden_f_batch = []
+        fid_batch = []
+        mask_f_batch = []
+        target_f_label_batch = []
+        max_f_num_batch = 0
+        
         for batch_idx in range(batch_size):
         # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]
@@ -290,6 +296,11 @@ class GraphX(nn.Module):
             s_num = s_nid.size(0)
 
             max_s_num_batch = max(max_s_num_batch, s_num)
+
+            f_nid = g.f_nid
+            f_num = f_nid.size(0)
+
+            max_f_num_batch = max(max_f_num_batch, f_num)
 
         ## fetch sentence hidden vectors
         for batch_idx in range(batch_size):
@@ -307,7 +318,7 @@ class GraphX(nn.Module):
             hidden_pad_s_g_i = torch.cat([hidden_s_g_i, pad_s_g_i], dim=0)
             hidden_s_batch.append(hidden_pad_s_g_i.unsqueeze(0))
 
-            #### change pad id 
+            #### pad id can be further improved
             sid = g.s_rawid
             pad_sid_i = torch.zeros(pad_s_num).to(self.m_device)
             sid_pad_i = torch.cat([sid, pad_sid_i], dim=0)
@@ -321,6 +332,32 @@ class GraphX(nn.Module):
             target_sid = g.gt_label
             target_sid_batch.append(target_sid)
 
+            f_nid = g.f_nid
+            f_num = f_nid.size(0)
+            pad_f_num = max_f_num_batch-f_num
+
+            hidden_f_g_i = hidden_g_i[f_nid]
+            pad_f_g_i = torch.zeros(pad_f_num, hidden_f_g_i.size(1)).to(self.m_device)
+            hidden_pad_f_g_i = torch.cat([hidden_f_g_i, pad_f_g_i], dim=0)
+            hidden_f_batch.append(hidden_pad_f_g_i.unsqueeze(0))
+
+            fid = g.f_rawid
+            pad_fid_i = torch.zeros(pad_f_num).to(self.m_device)
+            fid_pad_i = torch.cat([fid, pad_fid_i], dim=0)
+            fid_batch.append(fid_pad_i.unsqueeze(0))
+
+            mask_f = torch.zeros(max_f_num_batch).to(self.m_device)
+            mask_f[:f_num] = 1
+            mask_f_batch.append(mask_f.unsqueeze(0))
+
+            # pad_f_label_i = torch.zeros(pad_f_num).to(self.m_device)
+            # target_f_label_i = torch.cat([g.f_label, pad_f_label_i], dim=0)
+            # target_f_label_batch.append(target_f_label_i.unsqueeze(0))
+
+            target_f_label_i = g.f_label
+            target_f_label_batch.append(target_f_label_i)
+
+
         #### hidden_s_batch: batch_size*max_s_num_batch*hidden_size
         hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
         
@@ -332,8 +369,16 @@ class GraphX(nn.Module):
 
         ### make predictions
         #### logits: batch_size*max_s_num_batch*1
-        logits = self.sent_output(hidden_s_batch)
-        logits = logits.squeeze(-1)
-        logits = torch.sigmoid(logits)*mask_s_batch
+        s_logits = self.sent_output(hidden_s_batch)
+        s_logits = s_logits.squeeze(-1)
+        s_logits = torch.sigmoid(s_logits)*mask_s_batch
 
-        return logits, sid_batch, mask_s_batch, target_sid_batch
+        hidden_f_batch = torch.cat(hidden_f_batch, dim=0)
+        fid_batch = torch.cat(fid_batch, dim=0)
+        mask_f_batch = torch.cat(mask_f_batch, dim=0)
+
+        f_logits = self.feat_output(hidden_f_batch)
+        f_logits = f_logits.squeeze(-1)
+        f_logits = torch.sigmoid(f_logits)*mask_f_batch
+
+        return s_logits, sid_batch, mask_s_batch, target_sid_batch, f_logits, fid_batch, mask_f_batch, target_f_label_batch

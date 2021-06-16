@@ -274,16 +274,9 @@ class RATEBEER(Dataset):
         fid_node_num = len(nid2fid)
         ### we need to use fid to access feature embedding
 
-        # G.add_nodes(fid_node_num)
-        # G.set_n_initializer(dgl.init.zero_initializer)
-        # G.ndata["unit"] = torch.zeros(fid_node_num)
-        # G.ndata["dtype"] = torch.zeros(fid_node_num)
-        # G.ndata["id"] = torch.LongTensor(list(nid2fid.keys()))
-        # G.ndata["raw_id"] = torch.LongTensor(list(fid2nid.keys()))
-
         return fid2nid, nid2fid
 
-    def create_graph(self, uid, iid, sid_list, label_list):
+    def create_graph(self, uid, iid, sid_list, label_sid_list):
         
         
         ### add feature nodes
@@ -302,13 +295,6 @@ class RATEBEER(Dataset):
             sid2nid[sid_i] = nid_i
             nid2sid[nid_i] = sid_i
 
-
-        # G.add_nodes(sent_node_num)
-        # G.ndata["unit"][feature_node_num:] = torch.ones(sent_node_num)
-        # G.ndata["dtype"][feature_node_num:] = torch.ones(sent_node_num)
-        # G.ndata["id"][feature_node_num:] = torch.LongTensor(list(nid2sid.keys()))
-        # G.ndata["raw_id"][feature_node_num:] = torch.LongTensor(list(sid2nid.keys()))
-
         feat_sent_node_num = feature_node_num+sent_node_num
 
         ### add user, item nodes
@@ -318,23 +304,11 @@ class RATEBEER(Dataset):
         uid2nid = {uid:feat_sent_node_num}
         nid2uid = {feat_sent_node_num:uid}
         
-        # G.add_nodes(user_node_num)
-        # G.ndata["unit"][feat_sent_node_num:] = torch.ones(user_node_num)
-        # G.ndata["dtype"][feat_sent_node_num:] = torch.ones(user_node_num)*2
-        # G.ndata["id"][feat_sent_node_num:] = torch.LongTensor([uid])
-        # G.ndata["raw_id"][feat_sent_node_num:] = torch.LongTensor([uid])
-    
         ### add item noe
         item_node_num = 1
         iid2nid = {iid:feat_sent_node_num+user_node_num}
         nid2iid = {feat_sent_node_num+user_node_num:iid}
         
-        # G.add_nodes(item_node_num)
-        # G.ndata["unit"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)
-        # G.ndata["dtype"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)*3
-        # G.ndata["id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
-        # G.ndata["raw_id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
-
         src_nid_list = []
         des_nid_list = []
 
@@ -353,9 +327,6 @@ class RATEBEER(Dataset):
                 src_nid_list.append(nid_s)
                 des_nid_list.append(nid_f)
 
-                # G.add_edge(nid_f, nid_s, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
-                # G.add_edge(nid_s, nid_f, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
-    
         for i in range(user_node_num):
             nid_u = list(nid2uid.keys())[0]
             fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
@@ -372,8 +343,6 @@ class RATEBEER(Dataset):
                 src_nid_list.append(nid_u)
                 des_nid_list.append(nid_f)
 
-                # G.add_edge(nid_f, nid_u, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
-                # G.add_edge(nid_u, nid_f, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
 
         for i in range(item_node_num):
             nid_i = list(nid2iid.keys())[0]
@@ -390,21 +359,24 @@ class RATEBEER(Dataset):
 
                 src_nid_list.append(nid_i)
                 des_nid_list.append(nid_f)
-                # G.add_edge(nid_f, nid_i, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
-                # G.add_edge(nid_i, nid_f, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
-        
-        # G.set_e_initializer(dgl.init.zero_initializer)
-
-        label = np.zeros(sent_node_num)
+            
+        sent_label_array = np.zeros(sent_node_num)
         if not self.m_eval_flag:
-            labelid_list = [sid2nid[i]-feature_node_num for i in label_list]
-            label[np.array(labelid_list)] = 1
+            nonzero_sent_nid_list = [sid2nid[i]-feature_node_num for i in label_sid_list]
+            sent_label_array[np.array(nonzero_sent_nid_list)] = 1
 
-        label_tensor = torch.LongTensor(label).unsqueeze(1)
+        sent_label_tensor = torch.LongTensor(sent_label_array).unsqueeze(1)
 
-        # x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
-        # g = Data(x)   
-        
+        feat_label_array = np.zeros(feature_node_num)
+        for sid in label_sid_list:
+            fid2tfidf_dict_sent = self.m_sid2fid2tfidf_dict[sid]
+
+            for fid in fid2tfidf_dict_sent:
+                nid_f = fid2nid[fid]
+                feat_label_array[nid_f] = 1
+
+        feat_label_tensor = torch.LongTensor(feat_label_array).unsqueeze(1)
+
         g = Data()   
         g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
 
@@ -424,11 +396,10 @@ class RATEBEER(Dataset):
 
         g.edge_index = torch.LongTensor([src_nid_list, des_nid_list])
 
-        g["label"] = label_tensor
-       
-        # G.nodes[list(nid2sid.keys())].data["gt_label"] = gt_label_tensor
-        # G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
+        g["s_label"] = sent_label_tensor
 
+        g["f_label"] = feat_label_tensor
+       
         return g
     
     def load_graph_data(self, input_graph_dir):
@@ -793,7 +764,7 @@ class RATEBEER_TRAIN(RATEBEER):
 
         return vocab_obj    
 
-    def create_soft_graph(self, uid, iid, sid_list, label_list):
+    def create_graph(self, uid, iid, sid_list, label_sid_list):
         ### add feature nodes
         fid2nid, nid2fid = self.add_feature_node(uid, iid, sid_list)
         feature_node_num = len(fid2nid)
@@ -809,37 +780,19 @@ class RATEBEER_TRAIN(RATEBEER):
             sid2nid[sid_i] = nid_i
             nid2sid[nid_i] = sid_i
 
-        # G.add_nodes(sent_node_num)
-        # G.ndata["unit"][feature_node_num:] = torch.ones(sent_node_num)
-        # G.ndata["dtype"][feature_node_num:] = torch.ones(sent_node_num)
-        # G.ndata["id"][feature_node_num:] = torch.LongTensor(list(nid2sid.keys()))
-        # G.ndata["raw_id"][feature_node_num:] = torch.LongTensor(list(sid2nid.keys()))
-
         feat_sent_node_num = feature_node_num+sent_node_num
 
         ### add user, item nodes
         ### add user node
 
         user_node_num = 1
-       
-        # G.add_nodes(user_node_num)
-        # G.ndata["unit"][feat_sent_node_num:] = torch.ones(user_node_num)
-        # G.ndata["dtype"][feat_sent_node_num:] = torch.ones(user_node_num)*2
-        # G.ndata["id"][feat_sent_node_num:] = torch.LongTensor([uid])
-        # G.ndata["raw_id"][feat_sent_node_num:] = torch.LongTensor([uid])
-
+    
         uid2nid = {uid:feat_sent_node_num}
         nid2uid = {feat_sent_node_num:uid}
     
         ### add item noe
         item_node_num = 1
-
-        # G.add_nodes(item_node_num)
-        # G.ndata["unit"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)
-        # G.ndata["dtype"][feat_sent_node_num+user_node_num:] = torch.ones(item_node_num)*3
-        # G.ndata["id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
-        # G.ndata["raw_id"][feat_sent_node_num+user_node_num:] = torch.LongTensor([iid])
-
+    
         iid2nid = {iid:feat_sent_node_num+user_node_num}
         nid2iid = {feat_sent_node_num+user_node_num:iid}
         
@@ -861,9 +814,6 @@ class RATEBEER_TRAIN(RATEBEER):
                 src_nid_list.append(nid_s)
                 des_nid_list.append(nid_f)
 
-                # G.add_edge(nid_f, nid_s, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
-                # G.add_edge(nid_s, nid_f, data={"tffrac": torch.LongTensor([tfidf_sent]), "dtype": torch.Tensor([0])})
-    
         for i in range(user_node_num):
             nid_u = list(nid2uid.keys())[0]
             fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
@@ -880,9 +830,6 @@ class RATEBEER_TRAIN(RATEBEER):
                 src_nid_list.append(nid_u)
                 des_nid_list.append(nid_f)
 
-                # G.add_edge(nid_f, nid_u, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
-                # G.add_edge(nid_u, nid_f, data={"tffrac": torch.LongTensor([tfidf_user]), "dtype": torch.Tensor([0])})
-
         for i in range(item_node_num):
             nid_i = list(nid2iid.keys())[0]
             fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
@@ -898,38 +845,29 @@ class RATEBEER_TRAIN(RATEBEER):
 
                 src_nid_list.append(nid_i)
                 des_nid_list.append(nid_f)
-                # G.add_edge(nid_f, nid_i, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
-                # G.add_edge(nid_i, nid_f, data={"tffrac": torch.LongTensor([tfidf_item]), "dtype": torch.Tensor([0])})
-        # # G.set_e_initializer(dgl.init.zero_initializer)
 
-        # label = np.zeros(sent_node_num)
-        # if not self.m_eval_flag:
-        #     labelid_list = [sid2nid[i]-feature_node_num for i in label_list]
-        #     label[np.array(labelid_list)] = 1
-
-        # label_tensor = torch.LongTensor(label).unsqueeze(1)
-        
-        # g["label"] = label_tensor
-        # 
-        # # G.nodes[list(nid2sid.keys())].data["gt_label"] = gt_label_tensor
-        # # G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
-
-        label = np.zeros(sent_node_num)
-        soft_label_num = 4
+        sent_label_array = np.zeros(sent_node_num)
+        soft_sent_label_num = 4
 
         if not self.m_eval_flag:
-            for soft_label_idx in range(soft_label_num):
-                labelid_list = [sid2nid[i]-feature_node_num for i in label_list[soft_label_idx]]
-                if len(labelid_list) == 0:
+            for soft_label_idx in range(soft_sent_label_num):
+                nonzero_sent_nid_list = [sid2nid[i]-feature_node_num for i in label_sid_list[soft_label_idx]]
+                if len(nonzero_sent_nid_list) == 0:
                     continue
 
-                label[np.array(labelid_list)] = soft_label_idx
+                sent_label_array[np.array(nonzero_sent_nid_list)] = soft_label_idx
+        sent_label_tensor = torch.LongTensor(sent_label_array).unsqueeze(1)
 
-        label_tensor = torch.LongTensor(label).unsqueeze(1)
+        feat_label_array = np.zeros(feature_node_num)
+        for sid in label_sid_list[-1]:
+            fid2tfidf_dict_sent = self.m_sid2fid2tfidf_dict[sid]
 
-        # x = torch.zeros(feat_sent_node_num+user_node_num+item_node_num)
-        # g = Data(x)   
-        
+            for fid in fid2tfidf_dict_sent:
+                nid_f = fid2nid[fid]
+                feat_label_array[nid_f] = 1
+
+        feat_label_tensor = torch.LongTensor(feat_label_array).unsqueeze(1)
+
         g = Data()   
         g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
 
@@ -949,10 +887,9 @@ class RATEBEER_TRAIN(RATEBEER):
 
         g.edge_index = torch.LongTensor([src_nid_list, des_nid_list])
 
-        g["label"] = label_tensor
+        g["s_label"] = sent_label_tensor
 
-        # G.nodes[list(nid2sid.keys())].data["gt_label"] = gt_label_tensor
-        # G.nodes[list(nid2sid.keys())].data["label"] = label_tensor
+        g["f_label"] = feat_label_tensor
 
         return g
 
@@ -994,10 +931,8 @@ class RATEBEER_TRAIN(RATEBEER):
             cdd_sid_list_i = self.m_cdd_sid_list_list[i]
             gt_label_sid_list_i = self.m_gt_label_sid_list_list[i]
 
-            # print("gt_label_sid_list_i", gt_label_sid_list_i)
-
-            # g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
-            g_i = self.create_soft_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
+            g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
+            # g_i = self.create_soft_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
             g_i["gt_label"] = torch.tensor(gt_label_sid_list_i[-1])
             
             g_file_i = self.m_output_graph_dir+str(i)+".pt"

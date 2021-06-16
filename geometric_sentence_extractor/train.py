@@ -462,20 +462,20 @@ class TRAINER(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 #### logits: batch_size*max_sen_num
-                logits, sids, masks, target_sids = network.eval_forward(graph_batch)
+                s_logits, sids, masks, target_sids, _, _, _, _ = network.eval_forward(graph_batch)
 
                 # loss = self.m_rec_loss(glist)
                 # loss_list.append(loss.item())
 
                 ## topk sentence
                 #### logits: batch_size*topk_sent
-                topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
+                topk_logits, topk_pred_snids = torch.topk(s_logits, topk, dim=1)
                 
                 #### topk sentence index
                 #### pred_sids: batch_size*topk_sent
                 pred_sids = sids.gather(dim=1, index=topk_pred_snids)
 
-                batch_size = logits.size(0)
+                batch_size = s_logits.size(0)
 
                 for j in range(batch_size):
                     refs_j = []
