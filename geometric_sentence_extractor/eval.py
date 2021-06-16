@@ -19,11 +19,16 @@ from rouge import Rouge
 from nltk.translate import bleu_score
 import dgl
 import pickle
+import random
 
 dataset_name = 'medium_500'
 label_format = 'soft_label'
-use_blocking = False             # whether using 3-gram blocking or not
-use_filtering = False             # whether using bleu score based filtering or not
+use_blocking = False            # whether using 3-gram blocking or not
+use_filtering = True             # whether using bleu score based filtering or not
+save_predict = False
+random_sampling = False
+get_statistics = False
+bleu_filter_value = 0.25
 
 
 class EVAL(object):
@@ -50,8 +55,19 @@ class EVAL(object):
 
         self.m_device = device
         self.m_model_path = args.model_path
+        self.m_model_file = args.model_file
+        self.m_eval_output_path = args.eval_output_path
 
+        print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
         print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
+        if use_blocking:
+            print("Using tri-gram blocking.")
+        elif use_filtering:
+            print("Using bleu-based filtering.")
+        elif random_sampling:
+            print("Random sampling.")
+        else:
+            print("Use the original scores.")
 
         # need to load some mappings
         id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
@@ -74,6 +90,18 @@ class EVAL(object):
         with open(trainset_useritem_pair_file, 'r') as f:
             print("Load file: {}".format(trainset_useritem_pair_file))
             self.d_trainset_useritempair = json.load(f)
+
+        # save sid2words mapping
+        if save_predict:
+            self.this_DIR = '../data_postprocess/{}'.format(dataset_name)
+            if not os.path.isdir(self.this_DIR):
+                os.makedirs(self.this_DIR)
+                print("create folder: {}".format(self.this_DIR))
+            else:
+                print("{} folder already exists.".format(self.this_DIR))
+            this_mapping_file = os.path.join(self.this_DIR, 'sid2swords.pickle')
+            with open(this_mapping_file, 'wb') as handle:
+                pickle.dump(self.m_sid2swords, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
@@ -195,6 +223,9 @@ class EVAL(object):
         feature_num_per_review_ref = []
         feature_num_per_review_pred = []
 
+        num_sents_per_target_review = []
+        num_features_per_target_review = []
+
         print('--'*10)
 
         debug_index = 0
@@ -213,8 +244,7 @@ class EVAL(object):
             print("Number of evaluation data: {}".format(len(eval_data)))
 
             for graph_batch in eval_data:
-
-                if cnt_useritem_batch % 10 == 0:
+                if cnt_useritem_batch % 100 == 0:
                     print("... eval ... ", cnt_useritem_batch)
                 cnt_useritem_batch += 1
 
@@ -224,7 +254,102 @@ class EVAL(object):
                 logits, sids, masks, target_sids = self.m_network.eval_forward(graph_batch)
                 batch_size = logits.size(0)
 
-                if use_blocking:
+                # Save the predict logits and sids
+                if save_predict:
+                    userid_batch = graph_batch.u_rawid
+                    itemid_batch = graph_batch.i_rawid
+                    for i in range(batch_size):
+                        current_result_dict = {}
+                        current_result_dict['user_id'] = userid_batch[i].item()
+                        current_result_dict['item_id'] = itemid_batch[i].item()
+                        assert len(logits[i]) == len(sids[i])
+                        assert len(logits[i]) == len(masks[i])
+                        triple_data_list = []
+                        for pos in range(len(logits[i])):
+                            triple_data_list.append(
+                                [logits[i][pos].item(), sids[i][pos].item(), masks[i][pos].item()])
+                        current_result_dict['predict_data'] = triple_data_list
+                        current_target_sent_sids = []
+                        for this_sid in target_sids[i]:
+                            current_target_sent_sids.append(this_sid.item())
+                        current_result_dict['target'] = current_target_sent_sids
+
+                        # save current_result_dict into json file
+                        model_ckpt_name = self.m_model_file.split('.')[0]
+                        this_json_file = os.path.join(self.this_DIR, 'result_{}.json'.format(model_ckpt_name))
+                        with open(this_json_file, 'a') as f:
+                            json.dump(current_result_dict, f)
+                            f.write("\n")
+                    continue
+
+                if random_sampling:
+                    userid_batch = graph_batch.u_rawid
+                    itemid_batch = graph_batch.i_rawid
+                    for i in range(batch_size):
+                        # current_result_dict = {}
+                        # current_result_dict['user_id'] = self.m_uid2user[userid_batch[i].item()]
+                        # current_result_dict['item_id'] = self.m_iid2item[itemid_batch[i].item()]
+                        assert len(logits[i]) == len(sids[i])
+                        assert len(logits[i]) == len(masks[i])
+                        current_cdd_sent_sids = []
+                        current_target_sent_sids = []
+                        for pos in range(len(logits[i])):
+                            if masks[i][pos].item() == 1:
+                                current_cdd_sent_sids.append(sids[i][pos].item())
+                        for this_sid in target_sids[i]:
+                            current_target_sent_sids.append(this_sid.item())
+                        # randomly sample 3 sentences
+                        sampled_cdd_sent_sids = random.sample(current_cdd_sent_sids, 3)
+                        # get the content
+                        refs_j_list = []
+                        hyps_j_list = []
+                        for sid_cur in current_target_sent_sids:
+                            refs_j_list.append(self.m_sid2swords[sid_cur])
+                        for sid_cur in sampled_cdd_sent_sids:
+                            hyps_j_list.append(self.m_sid2swords[sid_cur])
+                        hyps_j = " ".join(hyps_j_list)
+                        refs_j = " ".join(refs_j_list)
+                        num_sents_per_target_review.append(len(current_target_sent_sids))
+
+                        scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+
+                        rouge_1_f_list.append(scores_j["rouge-1"]["f"])
+                        rouge_1_r_list.append(scores_j["rouge-1"]["r"])
+                        rouge_1_p_list.append(scores_j["rouge-1"]["p"])
+
+                        rouge_2_f_list.append(scores_j["rouge-2"]["f"])
+                        rouge_2_r_list.append(scores_j["rouge-2"]["r"])
+                        rouge_2_p_list.append(scores_j["rouge-2"]["p"])
+
+                        rouge_l_f_list.append(scores_j["rouge-l"]["f"])
+                        rouge_l_r_list.append(scores_j["rouge-l"]["r"])
+                        rouge_l_p_list.append(scores_j["rouge-l"]["p"])
+
+                        # bleu_scores_j = compute_bleu([refs_j], [hyps_j])
+                        bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
+                        bleu_list.append(bleu_scores_j)
+
+                        # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
+                        bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
+                        # bleu_1_scores_j = compute_bleu_order([refs_j], [hyps_j], order=1)
+                        bleu_1_list.append(bleu_1_scores_j)
+                        # bleu_2_scores_j = compute_bleu_order([refs_j], [hyps_j], order=2)
+                        bleu_2_list.append(bleu_2_scores_j)
+                        # bleu_3_scores_j = compute_bleu_order([refs_j], [hyps_j], order=3)
+                        bleu_3_list.append(bleu_3_scores_j)
+                        # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
+                        bleu_4_list.append(bleu_4_scores_j)
+                    continue
+
+                elif get_statistics:
+                    for i in range(batch_size):
+                        this_g = graph_batch[i]
+                        labels_feature = this_g.f_label
+                        print("shape of feature labels: {}".format(labels_feature.shape))
+                        num_features_per_target_review.append(torch.sum(labels_feature).item())
+                    continue
+
+                elif use_blocking:
                     # use n-gram blocking
                     # get all the sentence content
                     batch_sents_content = []
@@ -236,17 +361,18 @@ class EVAL(object):
                             cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
                         batch_sents_content.append(cur_sents_content)
                     assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
+                    masked_logits = (logits.cpu()+1)*masks.cpu()-1
                     # 1. get the top-k predicted sentences which form the hypothesis
-                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(batch_sents_content, logits, n_win=3, k=3)
+                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(batch_sents_content, masked_logits, n_win=3, k=3)
                     ngram_block_pred_snids = ngram_block_pred_snids.to(self.m_device)
                     pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
                     topk_logits = ngram_block_pred_proba
                     # 2. get the top-20 predicted sentences' content and proba
-                    top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(batch_sents_content, logits, n_win=3, k=topk_candidate)
+                    top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(batch_sents_content, masked_logits, n_win=3, k=topk_candidate)
                     top_cdd_pred_snids = top_cdd_pred_snids.to(self.m_device)
                     top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
                     # 3. get the bottom-20 predicted sentences' content and proba
-                    reverse_logits = (1-logits)*masks
+                    reverse_logits = (1-masked_logits)*masks.cpu()
                     bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
                 elif use_filtering:
@@ -261,30 +387,34 @@ class EVAL(object):
                             cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
                         batch_sents_content.append(cur_sents_content)
                     assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
+                    masked_logits = (logits.cpu()+1)*masks.cpu()-1
                     # 1. get the top-k predicted sentences which form the hypothesis
-                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.bleu_filtering(batch_sents_content, logits, k=3, filter_value=0.25)
+                    ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.bleu_filtering(batch_sents_content, masked_logits, k=3, filter_value=bleu_filter_value)
                     ngram_block_pred_snids = ngram_block_pred_snids.to(self.m_device)
                     pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
                     topk_logits = ngram_block_pred_proba
                     # 2. get the top-20 predicted sentences' content and proba
-                    top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(batch_sents_content, logits, k=topk_candidate, filter_value=0.25)
+                    top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(batch_sents_content, masked_logits, k=topk_candidate, filter_value=bleu_filter_value)
                     top_cdd_pred_snids = top_cdd_pred_snids.to(self.m_device)
                     top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
                     # 3. get the bottom-20 predicted sentences' content and proba
-                    reverse_logits = (1-logits)*masks
+                    reverse_logits = (1-masked_logits)*masks.cpu()
                     bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
                 else:
+                    # incase some not well-trained model will predict the logits for all sentences as 0.0, we apply masks on it
+                    masked_logits = (logits.cpu()+1)*masks.cpu()-1
                     # 1. get the top-k predicted sentences which form the hypothesis
-                    topk_logits, topk_pred_snids = torch.topk(logits, topk, dim=1)
+                    topk_logits, topk_pred_snids = torch.topk(masked_logits, topk, dim=1)
                     # topk sentence index
                     # pred_sids: shape: (batch_size, topk_sent)
+                    sids = sids.cpu()
                     pred_sids = sids.gather(dim=1, index=topk_pred_snids)
                     # 2. get the top-20 predicted sentences' content and proba
-                    top_cdd_logits, top_cdd_pred_snids = torch.topk(logits, topk_candidate, dim=1)
+                    top_cdd_logits, top_cdd_pred_snids = torch.topk(masked_logits, topk_candidate, dim=1)
                     top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
                     # 3. get the bottom-20 predicted sentences' content and proba
-                    reverse_logits = (1-logits)*masks
+                    reverse_logits = (1-masked_logits)*masks.cpu()
                     bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_logits, topk_candidate, dim=1)
                     bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
@@ -320,7 +450,8 @@ class EVAL(object):
                     else:
                         raise Exception("user: {} not in trainset but in testset!".format(true_userid_j))
 
-                    with open('../result/eval_logging_{0}_{1}.txt'.format(dataset_name, label_format), 'a') as f:
+                    predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_{0}_{1}.txt'.format(dataset_name, label_format))
+                    with open(predict_log_file, 'a') as f:
                         f.write("user id: {}\n".format(true_userid_j))
                         f.write("item id: {}\n".format(true_itemid_j))
                         f.write("hyps_j: {}\n".format(hyps_j))
@@ -336,8 +467,8 @@ class EVAL(object):
                     top_cdd_probs_j = top_cdd_logits[j]
                     for sid_k in top_cdd_pred_sids[j]:
                         top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-
-                    with open('../result/eval_logging_top_{0}_{1}.txt'.format(dataset_name, label_format), 'a') as f:
+                    top_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_top_{0}_{1}.txt'.format(dataset_name, label_format))
+                    with open(top_predict_log_file, 'a') as f:
                         f.write("user id: {}\n".format(true_userid_j))
                         f.write("item id: {}\n".format(true_itemid_j))
                         f.write("refs_j: {}\n".format(refs_j))
@@ -354,8 +485,8 @@ class EVAL(object):
                     bottom_cdd_probs_j = 1-bottom_cdd_logits[j]
                     for sid_k in bottom_cdd_pred_sids[j]:
                         bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-
-                    with open('../result/eval_logging_bottom_{0}_{1}.txt'.format(dataset_name, label_format), 'a') as f:
+                    bottom_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_bottom_{0}_{1}.txt'.format(dataset_name, label_format))
+                    with open(bottom_predict_log_file, 'a') as f:
                         f.write("user id: {}\n".format(true_userid_j))
                         f.write("item id: {}\n".format(true_itemid_j))
                         f.write("refs_j: {}\n".format(refs_j))
@@ -403,7 +534,10 @@ class EVAL(object):
                 # exit()
                 # break
 
-        assert len(rouge_1_f_list) == train_test_differ_cnt
+            # assert len(rouge_1_f_list) == train_test_differ_cnt
+
+        # self.m_mean_feature_num_per_review = np.mean(num_features_per_target_review)
+        # print("Mean number of features per review: {}".format(self.m_mean_feature_num_per_review))
 
         self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
         self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
@@ -422,6 +556,11 @@ class EVAL(object):
         self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
         self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
         self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
+
+        # if len(num_sents_per_target_review) != 0:
+        #     self.m_mean_num_sents_per_target_review = np.mean(num_sents_per_target_review)
+        #     print("Number of sentences for each target review (on average): {}".format(
+        #         self.m_mean_num_sents_per_target_review))
 
         # self.m_recall_feature = np.mean(feature_recall_list)
         # self.m_precision_feature = np.mean(feature_precision_list)
@@ -458,7 +597,8 @@ class EVAL(object):
         # print("total number of review [pred]: {}".format(len(feature_num_per_review_pred)))
         # print("total number of review [ref]: {}".format(len(feature_num_per_review_ref)))
 
-        with open('../result/eval_metrics_{0}_{1}.txt'.format(dataset_name, label_format), 'w') as f:
+        metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(dataset_name, label_format))
+        with open(metric_log_file, 'w') as f:
             print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n"%(
                 self.m_mean_eval_rouge_1_f,
                 self.m_mean_eval_rouge_1_p,
@@ -478,6 +618,9 @@ class EVAL(object):
             # print("feature precision: {}\n".format(self.m_precision_feature), file=f)
             print("Total number of user-item on testset (not appear in trainset): {}\n".format(train_test_differ_cnt), file=f)
             print("Total number of user-item on testset (appear in trainset): {}\n".format(train_test_overlap_cnt), file=f)
+            # if len(num_sents_per_target_review) != 0:
+            #     print("Number of sentences for each target review (on average): {}".format(
+            #         self.m_mean_num_sents_per_target_review), file=f)
 
     def ngram_blocking(self, sents, p_sent, n_win, k):
         """ ngram blocking
