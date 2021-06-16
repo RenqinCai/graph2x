@@ -13,8 +13,8 @@ from optimizer import OPTIM
 from logger import LOGGER
 
 import time
-from train import TRAINER
-from model import GraphX
+from train_single import TRAINER
+from model_single import GraphX
 from eval import EVAL
 
 

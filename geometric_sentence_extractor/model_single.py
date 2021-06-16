@@ -60,7 +60,7 @@ class GraphX(nn.Module):
         # self.wh = nn.Linear(args.hidden_size, 2)
         self.sent_output = nn.Linear(args.hidden_size, 1)
 
-        self.feat_output = nn.Linear(args.hidden_size, 1)
+        # self.feat_output = nn.Linear(args.hidden_size, 1)
 
         self.f_initialize()
 
@@ -77,7 +77,7 @@ class GraphX(nn.Module):
 
         # nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
         nn.init.uniform_(self.sent_output.weight, a=-1e-3, b=1e-3)
-        nn.init.uniform_(self.feat_output.weight, a=-1e-3, b=1e-3)
+        # nn.init.uniform_(self.feat_output.weight, a=-1e-3, b=1e-3)
 
     def f_load_feature_embedding(self, pre_feature_embed):
 
@@ -89,7 +89,7 @@ class GraphX(nn.Module):
             pre_feature_embed_weight.append(feature_embed_i)
 
         self.m_feature_embed.weight.data.copy_(torch.Tensor(pre_feature_embed_weight))
-
+        
         if not self.m_feature_finetune_flag:
             self.m_feature_embed.weight.requires_grad = False
 
@@ -186,7 +186,7 @@ class GraphX(nn.Module):
         ### list of sent_node_num*hidden_size
         hidden_s = []
 
-        hidden_f = []
+        # hidden_f = []
 
         ### speed up
         ## fetch sentence hidden vectors from graph
@@ -198,9 +198,9 @@ class GraphX(nn.Module):
             hidden_s_g_i = hidden_g_i[s_nid]
             hidden_s.append(hidden_s_g_i)
 
-            f_nid = g.f_nid
-            hidden_f_g_i = hidden_g_i[f_nid]
-            hidden_f.append(hidden_f_g_i)
+            # f_nid = g.f_nid
+            # hidden_f_g_i = hidden_g_i[f_nid]
+            # hidden_f.append(hidden_f_g_i)
 
         ### make predictions
 
@@ -209,10 +209,11 @@ class GraphX(nn.Module):
         ### logits: s_node_num*1
         logits_s = self.sent_output(hidden_s)
 
-        hidden_f = torch.cat(hidden_f, dim=0)
-        logits_f = self.feat_output(hidden_f)
+        # hidden_f = torch.cat(hidden_f, dim=0)
+        # logits_f = self.feat_output(hidden_f)
 
-        return logits_s, logits_f
+        # return logits_s, logits_f
+        return logits_s
 
     def eval_forward(self, graph_batch):
         ## init node embeddings

@@ -32,6 +32,7 @@ from collections import Counter
 from torch_geometric.data import Dataset, Data
 from multiprocessing import Pool 
 
+
 def readJson(fname):
     data = []
     line_num = 0
@@ -44,6 +45,7 @@ def readJson(fname):
             except:
                 print("error", line_num)
     return data
+
 
 class Vocab():
     def __init__(self):
@@ -399,11 +401,12 @@ class RATEBEER(Dataset):
         g["s_label"] = sent_label_tensor
 
         g["f_label"] = feat_label_tensor
-       
+
         return g
-    
+
     def load_graph_data(self, input_graph_dir):
-        self.m_input_graph_path = input_graph_dir 
+        self.m_input_graph_path = input_graph_dir
+
 
 class RATEBEER_TRAIN(RATEBEER):
     def __init__(self):

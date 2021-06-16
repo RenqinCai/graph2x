@@ -9,11 +9,10 @@ import torch.nn as nn
 from tensorboardX import SummaryWriter
 from loss import XE_LOSS, BPR_LOSS, SIG_LOSS
 from metric import get_example_recall_precision, compute_bleu, get_bleu, get_sentence_bleu
-from model import GraphX
+from model_single import GraphX
 import random
 import torch.nn.functional as F
 from rouge import Rouge
-from torch_geometric.utils import to_dense_batch
 
 
 class TRAINER(object):
@@ -182,7 +181,10 @@ class TRAINER(object):
             #     print("... eval ... ", i)
             
             graph_batch = g_batch.to(self.m_device)
-            logits_s, logits_f = network(graph_batch)
+            # For multi-task, we have 2 logits, sentence logits and feature logits
+            # logits_s, logits_f = network(graph_batch)
+            # For single-task, we only have 1 logits, sentence logits
+            logits_s = network(graph_batch)
 
             labels_s = graph_batch.s_label
             loss = None
@@ -192,22 +194,39 @@ class TRAINER(object):
                 loss_s = self.m_rec_loss(logits_s, labels_s.float())
             else:
                 loss_s = self.m_rec_soft_loss(graph_batch, logits_s, labels_s)
-
-            # 1. Loss from feature prediction
-            labels_f = graph_batch.f_label
-            loss_f = self.m_rec_loss(logits_f, labels_f.float())
-            # 2. multi-task loss, sum of sentence loss and feature loss
-            loss = loss_s + feat_loss_weight*loss_f
-
-            # add current sentence prediction loss
-            loss_s_list.append(loss_s.item())
-            tmp_loss_s_list.append(loss_s.item())
-            # add current feature prediction loss
-            loss_f_list.append(loss_f.item())
-            tmp_loss_f_list.append(loss_f.item())
-            # add current loss
-            loss_list.append(loss.item())
-            tmp_loss_list.append(loss.item())
+            
+            if self.m_multi_task:
+                # 1. Loss from feature prediction
+                # labels_f = graph_batch.f_label
+                # loss_f = self.m_rec_loss(logits_f, labels_f.float())
+                # 2. multi-task loss, sum of sentence loss and feature loss
+                # loss = loss_s + feat_loss_weight*loss_f
+                loss = loss_s
+                # add current sentence prediction loss
+                loss_s_list.append(loss_s.item())
+                tmp_loss_s_list.append(loss_s.item())
+                # # add current feature prediction loss
+                # loss_f_list.append(loss_f.item())
+                # tmp_loss_f_list.append(loss_f.item())
+                loss_f_list.append(0.0)
+                tmp_loss_f_list.append(0.0)
+                # add current loss
+                loss_list.append(loss.item())
+                tmp_loss_list.append(loss.item())
+            else:
+                # loss from feature prediction
+                # labels_f = graph_batch.f_label
+                # loss_f = self.m_rec_loss(logits_f, labels_f.float())
+                loss = loss_s
+                # add current sentence prediction loss
+                loss_s_list.append(loss_s.item())
+                tmp_loss_s_list.append(loss_s.item())
+                # add current feature prediction loss
+                loss_f_list.append(0.0)
+                tmp_loss_f_list.append(0.0)
+                # add current loss
+                loss_list.append(loss.item())
+                tmp_loss_list.append(loss.item())
 
             optimizer.zero_grad()
             loss.backward()
