@@ -11,26 +11,68 @@ import math
 from nltk.translate import bleu_score
 from rouge_score import rouge_scorer
 from sklearn import metrics
+import random
+
 
 def get_recall_precision_f1(preds, targets, topk=26):
-
-    fpr, tpr, thresholds = metrics.roc_curve(targets, preds, pos_label=2)
+    fpr, tpr, thresholds = metrics.roc_curve(targets.squeeze(), preds, pos_label=1)
     auc = metrics.auc(fpr, tpr)
 
     _, topk_preds = torch.topk(preds, topk, dim=0)
 
     topk_preds = F.one_hot(topk_preds, num_classes=targets.size(0))
+
+    topk_preds = torch.sum(topk_preds, dim=0)
+    targets = targets.squeeze()
+
     T = (topk_preds == targets)
     P = (topk_preds == 1)
 
-    TP = sum(T*P)
+    TP = sum(T*P).item()
 
     precision = TP/topk
 
-    recall = TP/sum(targets)
+    recall = TP/(sum(targets).item())
 
-    f1 = 2*precision*recall/(precision+recall)
-    
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc
+
+
+def get_recall_precision_f1_random(preds, targets, topk=26):
+    random_preds = torch.randn_like(preds)
+
+    fpr, tpr, thresholds = metrics.roc_curve(targets.squeeze(), random_preds, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+
+    _, topk_preds = torch.topk(random_preds, topk, dim=0)
+
+    topk_preds = F.one_hot(topk_preds, num_classes=targets.size(0))
+
+    topk_preds = torch.sum(topk_preds, dim=0)
+    targets = targets.squeeze()
+
+    T = (topk_preds == targets)
+    P = (topk_preds == 1)
+
+    TP = sum(T*P).item()
+
+    precision = TP/topk
+
+    recall = TP/(sum(targets).item())
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
     return precision, recall, f1, auc
 
 

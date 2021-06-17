@@ -14,7 +14,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_recall_precision_f1, get_sentence_bleu
+from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_recall_precision_f1, get_sentence_bleu, get_recall_precision_f1_random
 from rouge import Rouge
 from nltk.translate import bleu_score
 import dgl
@@ -24,10 +24,12 @@ import random
 dataset_name = 'medium_500'
 label_format = 'soft_label'
 use_blocking = False            # whether using 3-gram blocking or not
-use_filtering = True             # whether using bleu score based filtering or not
+use_filtering = False             # whether using bleu score based filtering or not
 save_predict = False
 random_sampling = False
+random_features = False
 get_statistics = False
+save_sentence_selected = False
 bleu_filter_value = 0.25
 
 
@@ -39,17 +41,16 @@ class EVAL(object):
         self.m_mean_loss = 0
 
         self.m_sid2swords = vocab_obj.m_sid2swords
-        # self.m_item2iid = vocab_obj.m_item2iid
         self.m_feature2fid = vocab_obj.m_feature2fid
         self.m_item2iid = vocab_obj.m_item2iid
         self.m_user2uid = vocab_obj.m_user2uid
 
         # get item id to item mapping
         self.m_iid2item = {self.m_item2iid[k]: k for k in self.m_item2iid}
-        # get fid to feature(id) mapping
-        self.m_fid2feature = {self.m_feature2fid[k]: k for k in self.m_feature2fid}
         # get user id to user mapping
         self.m_uid2user = {self.m_user2uid[k]: k for k in self.m_user2uid}
+        # get fid to feature(id) mapping
+        self.m_fid2feature = {self.m_feature2fid[k]: k for k in self.m_feature2fid}
 
         self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
@@ -251,7 +252,6 @@ class EVAL(object):
             for graph_batch in eval_data:
                 if cnt_useritem_batch % 100 == 0:
                     print("... eval ... ", cnt_useritem_batch)
-                cnt_useritem_batch += 1
 
                 graph_batch = graph_batch.to(self.m_device)
 
@@ -430,9 +430,12 @@ class EVAL(object):
 
                 for j in range(batch_size):
                     g = graph_batch[j]
-                    f_num.append(sum(g.f_label))
+                    f_num.append(sum(g.f_label).item())
 
-                print(np.mean(f_num))
+                # if cnt_useritem_batch % 10 == 0:
+                #     print(f_num)
+                #     print(np.mean(f_num))
+                cnt_useritem_batch += 1
 
                 for j in range(batch_size):
                     refs_j_list = []
@@ -463,53 +466,54 @@ class EVAL(object):
                     else:
                         raise Exception("user: {} not in trainset but in testset!".format(true_userid_j))
 
-                    predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_{0}_{1}.txt'.format(dataset_name, label_format))
-                    with open(predict_log_file, 'a') as f:
-                        f.write("user id: {}\n".format(true_userid_j))
-                        f.write("item id: {}\n".format(true_itemid_j))
-                        f.write("hyps_j: {}\n".format(hyps_j))
-                        f.write("refs_j: {}\n".format(refs_j))
-                        f.write("probas: {}\n".format(topk_logits[j]))
-                        if use_blocking:
-                            f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
-                        elif use_filtering:
-                            f.write("rank: {}\n".format(bleu_filter_pred_rank[j]))
-                        f.write("========================================\n")
-
-                    top_cdd_hyps_j = []
-                    top_cdd_probs_j = top_cdd_logits[j]
-                    for sid_k in top_cdd_pred_sids[j]:
-                        top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-                    top_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_top_{0}_{1}.txt'.format(dataset_name, label_format))
-                    with open(top_predict_log_file, 'a') as f:
-                        f.write("user id: {}\n".format(true_userid_j))
-                        f.write("item id: {}\n".format(true_itemid_j))
-                        f.write("refs_j: {}\n".format(refs_j))
-                        for k in range(topk_candidate):
-                            # key is the sentence content
-                            # value is the probability of this sentence
-                            f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
-                            f.write("prob: {}\n".format(top_cdd_probs_j[k].item()))
-                            # also retrieve the feature of this sentence
-                            f.write("----:----:----:----:----:----:----:----:\n")
-                        f.write("========================================\n")
-
-                    bottom_cdd_hyps_j = []
-                    bottom_cdd_probs_j = 1-bottom_cdd_logits[j]
-                    for sid_k in bottom_cdd_pred_sids[j]:
-                        bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-                    bottom_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_bottom_{0}_{1}.txt'.format(dataset_name, label_format))
-                    with open(bottom_predict_log_file, 'a') as f:
-                        f.write("user id: {}\n".format(true_userid_j))
-                        f.write("item id: {}\n".format(true_itemid_j))
-                        f.write("refs_j: {}\n".format(refs_j))
-                        for k in range(topk_candidate):
-                            # key is the sentence content
-                            # value is the probability of this sentence
-                            f.write("candidate sentence: {}\n".format(bottom_cdd_hyps_j[k]))
-                            f.write("prob: {}\n".format(bottom_cdd_probs_j[k].item()))
-                            f.write("----:----:----:----:----:----:----:----:\n")
-                        f.write("========================================\n")
+                    if save_sentence_selected:
+                        predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_{0}_{1}.txt'.format(dataset_name, label_format))
+                        with open(predict_log_file, 'a') as f:
+                            f.write("user id: {}\n".format(true_userid_j))
+                            f.write("item id: {}\n".format(true_itemid_j))
+                            f.write("hyps_j: {}\n".format(hyps_j))
+                            f.write("refs_j: {}\n".format(refs_j))
+                            f.write("probas: {}\n".format(topk_logits[j]))
+                            if use_blocking:
+                                f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
+                            elif use_filtering:
+                                f.write("rank: {}\n".format(bleu_filter_pred_rank[j]))
+                            f.write("========================================\n")
+                        # top-ranked sentences
+                        top_cdd_hyps_j = []
+                        top_cdd_probs_j = top_cdd_logits[j]
+                        for sid_k in top_cdd_pred_sids[j]:
+                            top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
+                        top_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_top_{0}_{1}.txt'.format(dataset_name, label_format))
+                        with open(top_predict_log_file, 'a') as f:
+                            f.write("user id: {}\n".format(true_userid_j))
+                            f.write("item id: {}\n".format(true_itemid_j))
+                            f.write("refs_j: {}\n".format(refs_j))
+                            for k in range(topk_candidate):
+                                # key is the sentence content
+                                # value is the probability of this sentence
+                                f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
+                                f.write("prob: {}\n".format(top_cdd_probs_j[k].item()))
+                                # also retrieve the feature of this sentence
+                                f.write("----:----:----:----:----:----:----:----:\n")
+                            f.write("========================================\n")
+                        # bottom-ranked sentences
+                        bottom_cdd_hyps_j = []
+                        bottom_cdd_probs_j = 1-bottom_cdd_logits[j]
+                        for sid_k in bottom_cdd_pred_sids[j]:
+                            bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
+                        bottom_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_bottom_{0}_{1}.txt'.format(dataset_name, label_format))
+                        with open(bottom_predict_log_file, 'a') as f:
+                            f.write("user id: {}\n".format(true_userid_j))
+                            f.write("item id: {}\n".format(true_itemid_j))
+                            f.write("refs_j: {}\n".format(refs_j))
+                            for k in range(topk_candidate):
+                                # key is the sentence content
+                                # value is the probability of this sentence
+                                f.write("candidate sentence: {}\n".format(bottom_cdd_hyps_j[k]))
+                                f.write("prob: {}\n".format(bottom_cdd_probs_j[k].item()))
+                                f.write("----:----:----:----:----:----:----:----:\n")
+                            f.write("========================================\n")
 
                     scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
 
@@ -549,19 +553,19 @@ class EVAL(object):
                     f_logits_j = f_logits[j]
                     fid_j = fids[j]
                     mask_f_j = f_masks[j]
-                    target_f_labels_j = target_f_labels[j]
+                    target_f_labels_j = target_f_labels[j].cpu()
 
                     f_num_j = target_f_labels_j.size(0)
-                    mask_f_logits_j = f_logits_j[:f_num_j]
-                    
-                    f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1(mask_f_logits_j, target_f_labels_j)
+                    mask_f_logits_j = f_logits_j[:f_num_j].cpu()
+
+                    if not random_features:
+                        f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1(mask_f_logits_j, target_f_labels_j)
+                    else:
+                        f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_random(mask_f_logits_j, target_f_labels_j)
                     f_precision_list.append(f_prec_j)
                     f_recall_list.append(f_recall_j)
                     f_F1_list.append(f_f1_j)
                     f_auc_list.append(f_auc_j)
-
-
-            # assert len(rouge_1_f_list) == train_test_differ_cnt
 
         # self.m_mean_feature_num_per_review = np.mean(num_features_per_target_review)
         # print("Mean number of features per review: {}".format(self.m_mean_feature_num_per_review))

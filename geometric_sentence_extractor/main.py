@@ -113,6 +113,7 @@ if __name__ == "__main__":
     parser.add_argument('--model_file', type=str, default="model_best.pt")
     parser.add_argument('--model_name', type=str, default="graph_sentence_extractor")
     parser.add_argument('--model_path', type=str, default="../checkpoint/")
+    parser.add_argument('--eval_output_path', type=str, default="../result/")
 
     ### model
     parser.add_argument('--user_embed_size', type=int, default=256)
@@ -123,7 +124,6 @@ if __name__ == "__main__":
     # parser.add_argument('--output_hidden_size', type=int, default=256)
     parser.add_argument('--head_num', type=int, default=4)
     parser.add_argument('--ffn_inner_hidden_size', type=int, default=256)
-
 
     ### train
     parser.add_argument('--soft_label', action="store_true", default=False)
@@ -143,7 +143,6 @@ if __name__ == "__main__":
     parser.add_argument('--feat_finetune', action='store_true', default=False)
     parser.add_argument('--sent_finetune', action='store_true', default=False)
     parser.add_argument('--multi_task', action='store_true', default=False)
-
 
     ### hyper-param
     # parser.add_argument('--init_mult', type=float, default=1.0)
