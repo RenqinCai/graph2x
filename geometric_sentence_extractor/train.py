@@ -188,7 +188,8 @@ class TRAINER(object):
             loss = None
             loss_s = None
             if not self.m_soft_train:
-                labels = (labels == 3)
+                # If not using soft label, only the gt sentences are labeled as 1
+                labels_s = (labels_s == 3)
                 loss_s = self.m_rec_loss(logits_s, labels_s.float())
             else:
                 loss_s = self.m_rec_soft_loss(graph_batch, logits_s, labels_s)

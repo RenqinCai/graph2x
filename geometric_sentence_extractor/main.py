@@ -16,6 +16,7 @@ import time
 from train import TRAINER
 from model import GraphX
 from eval import EVAL
+from eval_feature import EVAL_FEATURE
 
 
 def set_seed(seed):
@@ -90,13 +91,24 @@ def main(args):
     if args.eval:
         print("="*10, "eval", "="*10)
 
-        eval_obj = EVAL(vocab_obj, args, device)
+        if args.eval_feature:
+            print("Start feature prediction evaluation...")
+            eval_obj = EVAL_FEATURE(vocab_obj, args, device)
 
-        network = network.to(device)
+            network = network.to(device)
 
-        eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+            eval_obj.f_init_eval(network, args.model_file, reload_model=True)
 
-        eval_obj.f_eval(train_data, valid_data)
+            eval_obj.f_eval(train_data, valid_data)
+        else:
+            print("Start sentence prediction evaluation...")
+            eval_obj = EVAL(vocab_obj, args, device)
+
+            network = network.to(device)
+
+            eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+
+            eval_obj.f_eval(train_data, valid_data)
 
 
 if __name__ == "__main__":
@@ -153,6 +165,7 @@ if __name__ == "__main__":
     parser.add_argument('--train', action='store_true', default=False)
     parser.add_argument('--test', action='store_true', default=False)
     parser.add_argument('--eval', action='store_true', default=False)
+    parser.add_argument('--eval_feature', action='store_true', default=False)
     parser.add_argument('--parallel', action="store_true", default=False)
     parser.add_argument('--local_rank', type=int, default=0)
 
