@@ -29,7 +29,7 @@ label_format = 'soft_label'
 
 # how to select the top-predicted sentences
 use_origin = False
-use_trigram = False
+use_trigram = True
 use_bleu_filter = False
 
 # select features randomly
@@ -38,23 +38,25 @@ random_features = False
 # select features based on the popularity
 popular_features = False
 popular_features_vs_origin = False
-popular_features_vs_trigram = False
+popular_features_vs_trigram = True
 
 # select features based on the feature prediction scores
-predict_features = True
+predict_features = False
 predict_features_vs_origin = False
-predict_features_vs_trigram = False
+predict_features_vs_trigram = True
 
 save_sentence_selected = False
 save_feature_selected = True
 save_feature_logits = True
 
+# True if the predicted features is compared with the ground-turth features.
+# False if the predicted features is compared with the proxy's features.
 use_ground_truth = True
 
 avg_proxy_feature_num = 19
 avg_gt_feature_num = 15
 total_feature_num = 575
-MAX_batch_output = 100
+MAX_batch_output = 2000
 
 
 class EVAL_FEATURE(object):
@@ -179,10 +181,6 @@ class EVAL_FEATURE(object):
         self.d_trainset_sid2feature = self.get_sid2feature_train(
             self.d_trainset_sentid2featuretfidf, self.m_sent2sid)
 
-        self.f_prec_hyps_list = []
-        self.f_recall_hyps_list = []
-        self.f_f1_hyps_list = []
-
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
             print("reload model")
@@ -202,19 +200,27 @@ class EVAL_FEATURE(object):
         f_precision_list = []
         f_F1_list = []
         f_auc_list = []
+        # Popular feature P/R/F/AUC
+        f_pop_recall_list = []
+        f_pop_precision_list = []
+        f_pop_F1_list = []
+        f_pop_auc_list = []
+        # Selected sentences' feature P/R/F/AUC
+        f_sent_recall_list = []
+        f_sent_precision_list = []
+        f_sent_F1_list = []
+        f_sent_auc_list = []
 
         # average features in proxy/ground-truth
         proxy_feature_num_cnt = []
         gt_feature_num_cnt = []
 
-        topk = 3                # this is used for predict topk sentences
-        topk_candidate = 20     # this is used for sanity check for the top/bottom topk sentneces
+        s_topk = 3                # this is used for predict topk sentences
+        s_topk_candidate = 20     # this is used for sanity check for the top/bottom topk sentneces
         # already got feature2fid mapping, need the reverse
         self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
 
         cnt_useritem_batch = 0
-        train_test_overlap_cnt = 0
-        train_test_differ_cnt = 0
         save_logging_cnt = 0
         self.m_network.eval()
         with torch.no_grad():
@@ -234,11 +240,11 @@ class EVAL_FEATURE(object):
                 """
                 if use_trigram or popular_features_vs_trigram or predict_features_vs_trigram:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=topk, topk_cdd=topk_candidate
+                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate
                     )
                 else:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.origin_blocking_sent_prediction(
-                        s_logits, sids, s_masks, topk=topk, topk_cdd=topk_candidate
+                        s_logits, sids, s_masks, topk=s_topk, topk_cdd=s_topk_candidate
                     )
 
                 # Get the user/item id of this current graph batch.
@@ -301,6 +307,8 @@ class EVAL_FEATURE(object):
                     user_to_featuretf = self.d_trainset_user2featuretf[true_userid_j]
                     item_to_featuretf = self.d_trainset_item2featuretf[true_itemid_j]
                     useritem_to_featuretf = self.combine_featuretf(user_to_featuretf, item_to_featuretf)
+                    useritem_popular_features = None
+                    ui_popular_features_freq = None
 
                     """ Get the popular features (and the corresponding tf-value) for this user-item pair
                         The number of popular features has severla options:
@@ -368,56 +376,72 @@ class EVAL_FEATURE(object):
                     #             true_userid_j, true_itemid_j, fea_id
                     #         ))
 
-                    useritem_popular_features = None
                     top_pred_featureid_j = None
                     topk_preds_features_logits = None
+                    f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = 0, 0, 0, 0
+                    f_prec_j_sent, f_recall_j_sent, f_f1_j_sent, f_auc_j_sent = 0, 0, 0, 0
+                    f_prec_j, f_recall_j, f_f1_j, f_auc_j = 0, 0, 0, 0
 
                     if use_ground_truth:
+                        if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                            # P/R/F1/AUC of the popular features vs. gt features
+                            f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = get_recall_precision_f1_popular(
+                                useritem_popular_features, gt_featureid_j, useritem_to_featuretf, total_feature_num)
+                        if use_origin or use_trigram:
+                            # P/R/F1 of the selected sentences' features vs. gt features. AUC is meaningless here.
+                            f_prec_j_sent, f_recall_j_sent, f_f1_j_sent, f_auc_j_sent = get_recall_precision_f1_sent(
+                                hyps_featureid_j_list, gt_featureid_j, total_feature_num)
                         if random_features:
+                            # P/R/F1/AUC of the random features vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1_gt_random(
                                 mask_f_logits_j, gt_featureid_j, mask_featureid_j,
                                 avg_gt_feature_num, total_feature_num)
-                        elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
-                            f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_popular(
-                                useritem_popular_features, gt_featureid_j, useritem_to_featuretf, total_feature_num)
-                        elif use_trigram:
-                            f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_sent(
-                                hyps_featureid_j_list, gt_featureid_j, total_feature_num)
-                        elif use_origin:
-                            f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_sent(
-                                hyps_featureid_j_list, gt_featureid_j, total_feature_num)
                         elif predict_features_vs_origin or predict_features_vs_trigram:
+                            # P/R/F1/AUC of the predicted features (dynamic topk) vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j, topk_preds_features_logits = get_recall_precision_f1_gt(
                                 mask_f_logits_j, gt_featureid_j, mask_featureid_j,
                                 hyps_num_unique_features, total_feature_num)
                         else:
+                            # P/R/F1/AUC of the predicted features vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j, topk_preds_features_logits = get_recall_precision_f1_gt(
                                 mask_f_logits_j, gt_featureid_j, mask_featureid_j,
                                 avg_gt_feature_num, total_feature_num)
                     else:
+                        if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                            f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = get_recall_precision_f1_popular(
+                                useritem_popular_features, target_featureid_j, useritem_to_featuretf, total_feature_num)
+                        if use_origin or use_trigram:
+                            # P/R/F1 of the selected sentences' features vs. proxy features. AUC is meaningless here.
+                            f_prec_j_sent, f_recall_j_sent, f_f1_j_sent, f_auc_j_sent = get_recall_precision_f1_sent(
+                                hyps_featureid_j_list, target_featureid_j, total_feature_num)
                         if random_features:
+                            # P/R/F1/AUC of the random features vs. proxy features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1_random(
                                 mask_f_logits_j, target_f_labels_j, avg_proxy_feature_num)
-                        elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
-                            f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_popular(
-                                useritem_popular_features, target_featureid_j, useritem_to_featuretf, total_feature_num)
-                        elif use_trigram:
-                            f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_sent(
-                                hyps_featureid_j_list, target_featureid_j, total_feature_num)
-                        elif use_origin:
-                            f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1_sent(
-                                hyps_featureid_j_list, target_featureid_j, total_feature_num)
                         elif predict_features_vs_origin or predict_features_vs_trigram:
+                            # P/R/F1/AUC of the predicted features (dynamic topk) vs. proxy features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1(
                                 mask_f_logits_j, target_f_labels_j, hyps_num_unique_features)
                         else:
+                            # P/R/F1/AUC of the predicted features vs. proxy features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1(
                                 mask_f_logits_j, target_f_labels_j, avg_proxy_feature_num)
 
+                    # Add predicted (multi-task/random) features metrics
                     f_precision_list.append(f_prec_j)
                     f_recall_list.append(f_recall_j)
                     f_F1_list.append(f_f1_j)
                     f_auc_list.append(f_auc_j)
+                    # Add popular features metrics
+                    f_pop_precision_list.append(f_prec_j_pop)
+                    f_pop_recall_list.append(f_recall_j_pop)
+                    f_pop_F1_list.append(f_f1_j_pop)
+                    f_pop_auc_list.append(f_auc_j_pop)
+                    # Add selected sentence's feature metrics
+                    f_sent_precision_list.append(f_prec_j_sent)
+                    f_sent_recall_list.append(f_recall_j_sent)
+                    f_sent_F1_list.append(f_f1_j_sent)
+                    f_sent_auc_list.append(f_auc_j_sent)
 
                     # Save feature results into file
                     if save_feature_selected and batch_save_flag:
@@ -438,49 +462,76 @@ class EVAL_FEATURE(object):
                             f_recall=f_recall_j,
                             f_f1=f_f1_j,
                             f_auc=f_auc_j,
+                            f_precision_pop=f_prec_j_pop,
+                            f_recall_pop=f_recall_j_pop,
+                            f_f1_pop=f_f1_j_pop,
+                            f_auc_pop=f_auc_j_pop,
+                            f_precision_sent=f_prec_j_sent,
+                            f_recall_sent=f_recall_j_sent,
+                            f_f1_sent=f_f1_j_sent,
                             s_top_logits=s_topk_logits[j],
                             f_top_logits=topk_preds_features_logits
                         )
-
+        # metrics of predicted features (sentences'/multi-task/random)
         self.m_mean_f_precision = np.mean(f_precision_list)
         self.m_mean_f_recall = np.mean(f_recall_list)
         self.m_mean_f_f1 = np.mean(f_F1_list)
         self.m_mean_f_auc = np.mean(f_auc_list)
+        # metrics of popular features
+        self.m_mean_f_precision_pop = np.mean(f_pop_precision_list)
+        self.m_mean_f_recall_pop = np.mean(f_pop_recall_list)
+        self.m_mean_f_f1_pop = np.mean(f_pop_F1_list)
+        self.m_mean_f_auc_pop = np.mean(f_pop_auc_list)
+        # metrics of the selected sentences' features
+        self.m_mean_f_prec_hyps = np.mean(f_sent_precision_list)
+        self.m_mean_f_recall_hyps = np.mean(f_sent_recall_list)
+        self.m_mean_f_f1_hyps = np.mean(f_sent_F1_list)
+        # number of features (proxy/gt)
         self.m_mean_proxy_feature = np.mean(proxy_feature_num_cnt)
         self.m_mean_gt_feature = np.mean(gt_feature_num_cnt)
-        self.m_mean_f_prec_hyps = np.mean(self.f_prec_hyps_list)
-        self.m_mean_f_recall_hyps = np.mean(self.f_recall_hyps_list)
-        self.m_mean_f_f1_hyps = np.mean(self.f_f1_hyps_list)
-        # print("Length: P/R/F of hyps: {}".format(len(self.f_prec_hyps_list)))
 
-        print("Totally {0} batches ({1} data instances).\n Among them, {2} batches are saved into logging files.".format(
+        print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
             len(eval_data), len(f_precision_list), save_logging_cnt
         ))
-
         print("Average features num in proxy: %.4f. Average features num in ground-truth: %.4f" % (
             self.m_mean_proxy_feature, self.m_mean_gt_feature
         ))
-
-        print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
+        print("feature prediction (predict features), precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
             self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc
         ))
-
-        print("feature prediction (hyps vs. gt), precision: %.4f, recall: %.4f, F1: %.4f" % (
+        print("feature prediction (popular features), precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
+            self.m_mean_f_precision_pop, self.m_mean_f_recall_pop, self.m_mean_f_f1_pop, self.m_mean_f_auc_pop
+        ))
+        print("feature prediction (select sents features), precision: %.4f, recall: %.4f, F1: %.4f" % (
             self.m_mean_f_prec_hyps, self.m_mean_f_recall_hyps, self.m_mean_f_f1_hyps
         ))
 
         metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(
             dataset_name, label_format))
         with open(metric_log_file, 'w') as f:
+            print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
+                len(eval_data), len(f_precision_list), save_logging_cnt
+            ), file=f)
+            print("Average features num in proxy: %.4f. Average features num in ground-truth: %.4f\n" % (
+                self.m_mean_proxy_feature, self.m_mean_gt_feature
+            ), file=f)
             print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f \n" % (
-                self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc), file=f)
-            print("Total number of user-item on testset (not appear in trainset): {}\n".format(
-                train_test_differ_cnt), file=f)
-            print("Total number of user-item on testset (appear in trainset): {}\n".format(
-                train_test_overlap_cnt), file=f)
+                self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc
+            ), file=f)
+            print("feature prediction (popular features), precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
+                self.m_mean_f_precision_pop, self.m_mean_f_recall_pop, self.m_mean_f_f1_pop, self.m_mean_f_auc_pop
+            ), file=f)
+            print("feature prediction (select sents features), precision: %.4f, recall: %.4f, F1: %.4f" % (
+                self.m_mean_f_prec_hyps, self.m_mean_f_recall_hyps, self.m_mean_f_f1_hyps
+            ), file=f)
 
     def combine_featuretf(self, user_featuretf, item_featuretf):
         """ Add 2 dict together to get the feature tf-value on this user and this item
+        :param: user_featuretf: user-side feature frequency (i.e. tf) dict
+                                key: featureid, value: frequency (i.e. tf) of this featureid
+        :param: item_featuretf: item-side feature frequency (i.e. tf) dict
+                                key: featureid, value: frequency (i.e. tf) of this featureid
+        return: useritem_featuretf, key: featureid, value: frequency(i.e. tf) of this featureid
         """
 
         useritem_featuretf = dict()
@@ -505,6 +556,8 @@ class EVAL_FEATURE(object):
 
     def get_popular_features(self, useritem_featuretf, topk=26):
         """ Get the popular features (id) based on the feature tf value
+        return: topk_popular_features: topk popular feature's featureid, list
+                topk_popular_features_freq: topk popular feature's frequency (i.e. tf value), list
         """
 
         sorted_useritem_featuretf = dict(sorted(useritem_featuretf.items(), key=lambda item: item[1], reverse=True))
@@ -624,8 +677,8 @@ class EVAL_FEATURE(object):
                 idx_rank += 1
                 try:
                     cur_sent = sents[batch_idx][idx]
-                except:
-                    print("i: {0} \t idx: {1}".format(batch_idx, idx))
+                except KeyError:
+                    print("i: {0} \t idx: {1} has key error!".format(batch_idx, idx))
                 cur_tokens = cur_sent.split()
                 overlap_flag = False
                 cur_sent_ngrams = []
@@ -648,6 +701,7 @@ class EVAL_FEATURE(object):
             batch_select_rank.append(select_rank)
         # convert list to torch tensor
         batch_select_idx = torch.LongTensor(batch_select_idx)
+        batch_select_proba = torch.tensor(batch_select_proba)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
     def origin_blocking_sent_prediction(self, s_logits, sids, s_masks, topk=3, topk_cdd=20):
@@ -720,11 +774,9 @@ class EVAL_FEATURE(object):
     def features_result_save_file(
         self, proxy_featureids, gt_featureids, hyps_featureids, popular_featureids, top_predict_featureids,
             user_id, item_id, ref_sents, hyps_sents, proxy_sents, hyps_sents_list, sids_user_item_source,
-            f_precision, f_recall, f_f1, f_auc,
-            s_top_logits, f_top_logits):
+            f_precision, f_recall, f_f1, f_auc, f_precision_pop, f_recall_pop, f_f1_pop, f_auc_pop,
+            f_precision_sent, f_recall_sent, f_f1_sent, s_top_logits, f_top_logits):
         """ Write the results into file.
-        :param: use_ground_truth: True if the predicted features is compared with the ground-turth features.
-            False if the predicted features is compared with the proxy's features
         :param: proxy_featureids: proxy's featureids, list
         :param: gt_featureids: ground-truth's featureids, list
         :param: hyps_featureids: hypothesis/predict sentences' featureids, list
@@ -753,9 +805,13 @@ class EVAL_FEATURE(object):
         if popular_featureids is not None:
             popular_featureids_set = set(popular_featureids)
             assert len(popular_featureids) == len(popular_featureids_set)
+        else:
+            popular_featureids_set = None
         if top_predict_featureids is not None:
             top_predict_featureids_set = set(top_predict_featureids)
             assert len(top_predict_featureids) == len(top_predict_featureids_set)
+        else:
+            top_predict_featureids_set = None
 
         assert s_top_logits.size(0) == len(hyps_sents_list)
         if f_top_logits is not None:
@@ -769,32 +825,50 @@ class EVAL_FEATURE(object):
         # not have duplications based on the way we compute them.
         if popular_featureids is not None:
             popular_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in popular_featureids]
+        else:
+            popular_featurewords = None
         if top_predict_featureids is not None:
             top_predict_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in top_predict_featureids]
-
-        if use_ground_truth:
-            # 1. use the features from the predicted sentences.
-            if use_origin or use_trigram:
-                overlap_featureids_set = gt_featureids_set.intersection(hyps_featureids_set)
-            # 2. Use the popular features
-            elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
-                overlap_featureids_set = gt_featureids_set.intersection(popular_featureids_set)
-            # 3. Use the predicted features by the multi-task model or random features
-            else:
-                overlap_featureids_set = gt_featureids_set.intersection(top_predict_featureids_set)
         else:
-            # 1. Use the features from the predicted sentences.
+            top_predict_featurewords = None
+
+        overlap_featureids_set_pop = None
+        overlap_featureids_set_sent = None
+        overlap_featureids_set_pred = None
+        if use_ground_truth:
+            # 1. Use the popular features
+            if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                overlap_featureids_set_pop = gt_featureids_set.intersection(popular_featureids_set)
+            # 2. use the features from the predicted sentences.
+            if use_origin or use_trigram:
+                overlap_featureids_set_sent = gt_featureids_set.intersection(hyps_featureids_set)
+            # 3. Use the predicted features by the multi-task model or random features
+            if top_predict_featureids_set is not None:
+                overlap_featureids_set_pred = gt_featureids_set.intersection(top_predict_featureids_set)
+        else:
+            # 1. Use the popular features
+            if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                overlap_featureids_set_pop = proxy_featureids_set.intersection(popular_featureids_set)
+            # 2. Use the features from the predicted sentences.
             # Options: use_origin/use_trigram
             if use_origin or use_trigram:
-                overlap_featureids_set = proxy_featureids_set.intersection(hyps_featureids_set)
-            # 2. Use the popular features
-            elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
-                overlap_featureids_set = proxy_featureids_set.intersection(popular_featureids_set)
+                overlap_featureids_set_sent = proxy_featureids_set.intersection(hyps_featureids_set)
             # 3. Use the predicted features by the multi-task model or random features
-            else:
-                overlap_featureids_set = proxy_featureids_set.intersection(top_predict_featureids_set)
-
-        overlap_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set]
+            if top_predict_featureids_set is not None:
+                overlap_featureids_set_pred = proxy_featureids_set.intersection(top_predict_featureids_set)
+        # Convert overlap featureid to feature words
+        if overlap_featureids_set_pop is not None:
+            overlap_featurewords_pop = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set_pop]
+        else:
+            overlap_featurewords_pop = None
+        if overlap_featureids_set_sent is not None:
+            overlap_featurewords_sent = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set_sent]
+        else:
+            overlap_featurewords_sent = None
+        if overlap_featureids_set_pred is not None:
+            overlap_featurewords_pred = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set_pred]
+        else:
+            overlap_featurewords_pred = None
 
         # Combine sentence with its logits score and source (i.e. user/item side)
         if hyps_sent_print_info:
@@ -813,13 +887,6 @@ class EVAL_FEATURE(object):
                 feature_info = "({:.4})".format(feature_logits)
                 top_pred_features_with_logits.append(top_predict_featurewords[i]+" "+feature_info)
 
-        # Get the feature precision/recall/F1 of the predicted/selected sentences
-        f_prec_hyps, f_recall_hyps, f_f1_hyps, _ = get_recall_precision_f1_sent(
-            list(hyps_featureids_set), list(gt_featureids_set), total_feature_num)
-        self.f_prec_hyps_list.append(f_prec_hyps)
-        self.f_recall_hyps_list.append(f_recall_hyps)
-        self.f_f1_hyps_list.append(f_f1_hyps)
-
         if use_ground_truth:
             # write file
             with open(features_result_file_path, 'a') as f:
@@ -834,17 +901,17 @@ class EVAL_FEATURE(object):
                 f.write("predict sentences' features: {}\n".format("["+", ".join(hyps_featurewords)+"]"))
                 if use_origin or use_trigram:
                     f.write("overlappings (select sentences vs. gt features): {}\n".format(
-                        "["+", ".join(overlap_featurewords)+"]"))
-                elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                        "["+", ".join(overlap_featurewords_sent)+"]"))
+                if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
                     f.write("popular features: {}\n".format(
                         "["+", ".join(popular_featurewords)+"]"))
                     f.write("overlappings (popular vs. gt features): {}\n".format(
-                        "["+", ".join(overlap_featurewords)+"]"))
-                elif random_features:
+                        "["+", ".join(overlap_featurewords_pop)+"]"))
+                if random_features:
                     f.write("random features: {}\n".format(
                         "["+", ".join(top_predict_featurewords)+"]"))
                     f.write("overlappings (random vs. gt features): {}\n".format(
-                        "["+", ".join(overlap_featurewords)+"]"))
+                        "["+", ".join(overlap_featurewords_pred)+"]"))
                 else:
                     if predict_features_print_logits:
                         f.write("top predict features: {}\n".format(
@@ -853,25 +920,26 @@ class EVAL_FEATURE(object):
                         f.write("top predict features: {}\n".format(
                             "["+", ".join(top_predict_featurewords)+"]"))
                     f.write("overlappings (top-predict vs. gt features): {}\n".format(
-                        "["+", ".join(overlap_featurewords)+"]"))
+                        "["+", ".join(overlap_featurewords_pred)+"]"))
                 f.write("Number of unique features in ground-truth: {}\n".format(len(gt_featurewords)))
                 f.write("Number of unique features in predict sentences: {}\n".format(len(hyps_featurewords)))
                 if use_origin or use_trigram:
-                    # f.write("Number of unique features in predict sentences: {}\n".format(len(hyps_featurewords)))
-                    f.write("Number of feature overlap (select sentences vs. gt features): {}\n".format(len(overlap_featurewords)))
-                elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                    f.write("Number of feature overlap (select sentences vs. gt features): {}\n".format(len(overlap_featurewords_sent)))
+                if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
                     f.write("Number of unique popular features: {}\n".format(len(popular_featurewords)))
-                    f.write("Number of feature overlap (popular vs. gt features): {}\n".format(len(overlap_featurewords)))
-                elif random_features:
+                    f.write("Number of feature overlap (popular vs. gt features): {}\n".format(len(overlap_featurewords_pop)))
+                if random_features:
                     f.write("Number of unique random features: {}\n".format(len(top_predict_featurewords)))
-                    f.write("Number of feature overlap (random vs. gt features): {}\n".format(len(overlap_featurewords)))
+                    f.write("Number of feature overlap (random vs. gt features): {}\n".format(len(overlap_featurewords_pred)))
                 else:
                     f.write("Number of top-predict features: {}\n".format(len(top_predict_featurewords)))
-                    f.write("Number of feature overlap (top-predict vs. gt features): {}\n".format(len(overlap_featurewords)))
+                    f.write("Number of feature overlap (top-predict vs. gt features): {}\n".format(len(overlap_featurewords_pred)))
                 f.write("Top-predict features vs. gt features. Precision: %.4f\tRecall: %.4f\tF1: %.4f\tAUC: %.4f\n" % (
                     f_precision, f_recall, f_f1, f_auc))
+                f.write("Popular features vs. gt features. Precision: %.4f\tRecall: %.4f\tF1: %.4f\tAUC: %.4f\n" % (
+                    f_precision_pop, f_recall_pop, f_f1_pop, f_auc_pop))
                 f.write("Features in the hyps vs. gt features. Precision: %.4f\tRecall: %.4f\tF1: %.4f\n" % (
-                    f_prec_hyps, f_recall_hyps, f_f1_hyps
+                    f_precision_sent, f_recall_sent, f_f1_sent
                 ))
                 f.write("==------==------==------==------==------==------==\n")
 
@@ -886,18 +954,25 @@ class EVAL_FEATURE(object):
                 f.write("proxy features: {}\n".format(", ".join(proxy_featurewords)))
                 if use_origin or use_trigram:
                     f.write("predict sentences' features: {}\n".format(", ".join(hyps_featurewords)))
-                elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                    f.write("overlappings (select sentences vs. gt features): {}\n".format(
+                        ", ".join(overlap_featurewords_sent)))
+                if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
                     f.write("popular features: {}\n".format(", ".join(popular_featurewords)))
-                else:
+                    f.write("overlappings (popular vs. proxy features): {}\n".format(
+                        ", ".join(overlap_featurewords_pop)))
+                if top_predict_featurewords is not None:
                     f.write("top predict features: {}\n".format(", ".join(top_predict_featurewords)))
-                f.write("overlappings: {}\n".format(", ".join(overlap_featurewords)))
+                    f.write("overlappings (top-predict vs. proxy features): {}\n".format(
+                        ", ".join(overlap_featurewords_pred)))
                 f.write("Number of unique features in proxy: {}\n".format(len(proxy_featurewords)))
                 if use_origin or use_trigram:
                     f.write("Number of unique features in predict sentences: {}\n".format(len(hyps_featurewords)))
-                elif popular_features or popular_features_vs_origin or popular_features_vs_trigram:
+                    f.write("Number of feature overlap (select sentences vs. gt features): {}\n".format(len(overlap_featurewords_sent)))
+                if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
                     f.write("Number of unique popular features: {}\n".format(len(popular_featurewords)))
-                else:
+                    f.write("Number of feature overlap (popular vs. proxy features): {}\n".format(len(overlap_featurewords_pop)))
+                if top_predict_featurewords is not None:
                     f.write("Number of top-predict features: {}\n".format(len(top_predict_featurewords)))
-                f.write("Number of feature overlap: {}\n".format(len(overlap_featurewords)))
+                    f.write("Number of feature overlap (top-predict vs. proxy features): {}\n".format(len(overlap_featurewords_pred)))
                 f.write("Precision: {0}\tRecall: {1}\tF1: {2}\tAUC: {3}\n".format(f_precision, f_recall, f_f1, f_auc))
                 f.write("==------==------==------==------==------==------==\n")
