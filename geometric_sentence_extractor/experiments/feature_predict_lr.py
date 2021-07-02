@@ -48,6 +48,7 @@ def load_test_feature_label(feature_label_file):
     x_ids = []
     x = []
     y = []
+    topk_y = []
     for i in range(data_num):
         data_i = data[i]
         pair_index = data.keys()
@@ -56,6 +57,9 @@ def load_test_feature_label(feature_label_file):
         feature_id_embed = pair_value["feature"]
         feature_id = feature_id_embed[:, 0]
         feature_embed = feature_id_embed[:, 1: ]
+
+        topk_num = pair_value["topk"]
+        topk_y.append(topk_num)
 
         x_ids.append(feature_id)
         x.append(feature_embed)
@@ -67,7 +71,7 @@ def load_test_feature_label(feature_label_file):
     # # y = np.array(y)
     # print("x size", x.shape)
     
-    return x_ids, x, y
+    return x_ids, x, topk_y, y
 
 def train_model(x, y):
 
@@ -75,7 +79,7 @@ def train_model(x, y):
     
     return clf
 
-def iterate_eval_model(model, x_ids, x, y, topk):
+def iterate_eval_model(model, x_ids, x, y, test_topk_num):
     pair_num = len(x)
     precision_list = []
     recall_list = []
@@ -86,17 +90,17 @@ def iterate_eval_model(model, x_ids, x, y, topk):
         x_i = x[i]
         y_i = y[i]
         xid_i = x_ids[i]
+        topk_i = test_topk_num[i]
 
-        preds = model.predict_proba(x_i)
-        idx = np.argpartition(preds, -topk)[-topk:]  # Indices not sorted
-        topk_preds = idx[np.argsort(preds[idx])][::-1] 
+        preds_i = model.predict_proba(x_i)
+        idx_i = np.argpartition(preds_i, -topk_i)[-topk_i:]  # Indices not sorted
+        topk_preds_idx_i = idx_i[np.argsort(preds_i[idx_i])][::-1] 
 
-        topk_preds = xid_i[topk_preds]
+        topk_preds_i = xid_i[topk_preds_idx_i]
         
-        TP = set(topk_preds).intersection(set(y_i))
+        TP = set(topk_preds_i).intersection(set(y_i))
 
-        precision = TP/topk
-
+        precision = TP/topk_i
         recall = TP/len(y_i)
 
         f1 = 2*precision*recall/(precision+recall)
@@ -142,11 +146,9 @@ lr_model = train_model(train_x, train_y)
 
 test_input_file = ".json"
 
-test_x, test_y = load_test_feature_label(test_input_file)
+test_x_ids, test_x, test_topk_num, test_y = load_test_feature_label(test_input_file)
 
-topk = 10
-
-precision, recall, f1 = iterate_eval_model(lr_model, test_x, test_y, topk)
+precision, recall, f1 = iterate_eval_model(lr_model, test_x, test_y, test_topk_num)
 
 # precision, recall, f1, auc = eval_model(lr_model, test_x, test_y, topk)
 
