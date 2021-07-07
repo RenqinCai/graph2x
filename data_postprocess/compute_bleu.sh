@@ -1,0 +1,1 @@
+perl multi-bleu.perl "../result/feature_purify/lr0.0005_06_22/feature_lambda_0.0/bleu_025/reference.txt" < "../result/feature_purify/lr0.0005_06_22/feature_lambda_0.0/bleu_025/hypothesis.txt"
