@@ -160,6 +160,7 @@ if __name__ == "__main__":
     # parser.add_argument('--init_mult', type=float, default=1.0)
     # parser.add_argument('--variance', type=float, default=0.995)
     # parser.add_argument('--max_seq_length', type=int, default=100)
+    parser.add_argument('--select_topk_s', type=int, default=3)
 
     ### others
     parser.add_argument('--train', action='store_true', default=False)

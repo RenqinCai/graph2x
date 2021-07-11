@@ -963,6 +963,7 @@ class RATEBEER_VALID(RATEBEER):
         gt_label_sid_list_list = []
 
         #### useritem_sent {userid: {itemid: [cdd_sentid] [label_sentid]}}
+        #### useritem_cddsent_withproxy {userid: {itemid: [cdd_sentid] [label_sentid] [proxy_sentid]}}
         useritem_cdd_label_sent = readJson(useritem_candidate_label_sent_file)[0]
         useritem_cdd_label_sent_num = len(useritem_cdd_label_sent)
         print("useritem_cdd_label_sent_num", useritem_cdd_label_sent_num)

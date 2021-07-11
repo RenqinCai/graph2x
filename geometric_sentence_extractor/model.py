@@ -381,4 +381,4 @@ class GraphX(nn.Module):
         f_logits = f_logits.squeeze(-1)
         f_logits = torch.sigmoid(f_logits)*mask_f_batch
 
-        return s_logits, sid_batch, mask_s_batch, target_sid_batch, f_logits, fid_batch, mask_f_batch, target_f_label_batch
+        return s_logits, sid_batch, mask_s_batch, target_sid_batch, f_logits, fid_batch, mask_f_batch, target_f_label_batch, hidden_f_batch

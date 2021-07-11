@@ -56,7 +56,7 @@ use_ground_truth = True
 avg_proxy_feature_num = 19
 avg_gt_feature_num = 15
 total_feature_num = 575
-MAX_batch_output = 2000
+MAX_batch_output = 10000
 
 
 class EVAL_FEATURE(object):
@@ -233,7 +233,7 @@ class EVAL_FEATURE(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 # logits: batch_size*max_sen_num
-                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
+                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels, _ = self.m_network.eval_forward(graph_batch)
                 batch_size = s_logits.size(0)
 
                 """ Get the topk predicted sentences
@@ -262,7 +262,8 @@ class EVAL_FEATURE(object):
                 if batch_save_flag:
                     save_logging_cnt += 1
                 else:
-                    # do nothing
+                    # pass or break. pass will continue evaluating full batch testing set, break will only
+                    # evaluate the first several batches of the testing set.
                     # pass
                     break
 
@@ -512,10 +513,10 @@ class EVAL_FEATURE(object):
             print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
                 len(eval_data), len(f_precision_list), save_logging_cnt
             ), file=f)
-            print("Average features num in proxy: %.4f. Average features num in ground-truth: %.4f\n" % (
+            print("Average features num in proxy: %.4f. Average features num in ground-truth: %.4f" % (
                 self.m_mean_proxy_feature, self.m_mean_gt_feature
             ), file=f)
-            print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f \n" % (
+            print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
                 self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc
             ), file=f)
             print("feature prediction (popular features), precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
