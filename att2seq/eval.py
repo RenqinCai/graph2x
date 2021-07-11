@@ -21,162 +21,28 @@ import pickle
 import random
 
 dataset_name = 'medium_500_pure'
-label_format = 'soft_label'
-use_blocking = True        # whether using 3-gram blocking or not
-use_filtering = False       # whether using bleu score based filtering or not
-save_predict = False
-random_sampling = False
-random_features = False
-get_statistics = False
-save_sentence_selected = False
-save_feature_selected = False
-bleu_filter_value = 0.25
-
-# Baselines
-use_majority_vote_popularity = True
-use_majority_vote_feature_score = False
-save_hyps_refs = False
-compute_rouge_score = False
-compute_bleu_score = False
-# Save feature hidden embeddings (after forward through the GAT model)
-save_train_feature_hidden = False
-save_test_feature_hidden = False
-percentage_train_data_saved = 0.1
-
-MAX_batch_output = 100
+save_hyps_refs = True
+compute_rouge_score = True
+compute_bleu_score = True
+MAX_batch_output = 1000
 
 
 class EVAL(object):
-    def __init__(self, vocab_obj, args, device):
+    def __init__(self, args, device, vocab_obj):
         super().__init__()
 
         self.m_batch_size = args.batch_size
         self.m_mean_loss = 0
-
-        self.m_sid2swords = vocab_obj.m_sid2swords
-        self.m_feature2fid = vocab_obj.m_feature2fid
-        self.m_item2iid = vocab_obj.m_item2iid
-        self.m_user2uid = vocab_obj.m_user2uid
-        self.m_sent2sid = vocab_obj.m_sent2sid
-        self.m_train_sent_num = vocab_obj.m_train_sent_num
-
-        # get item id to item mapping
-        self.m_iid2item = {self.m_item2iid[k]: k for k in self.m_item2iid}
-        # get user id to user mapping
-        self.m_uid2user = {self.m_user2uid[k]: k for k in self.m_user2uid}
-        # get fid to feature(id) mapping
-        self.m_fid2feature = {self.m_feature2fid[k]: k for k in self.m_feature2fid}
-        # get sid to sent_id mapping
-        self.m_sid2sentid = {self.m_sent2sid[k]: k for k in self.m_sent2sid}
-
-        self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
         self.m_device = device
         self.m_model_path = args.model_path
         self.m_model_file = args.model_file
         self.m_eval_output_path = args.eval_output_path
 
+        self.m_vocab = vocab_obj
+
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
-        print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
-        if use_blocking:
-            print("Using tri-gram blocking.")
-        elif use_filtering:
-            print("Using bleu-based filtering.")
-        elif random_sampling:
-            print("Random sampling.")
-        else:
-            print("Use the original scores.")
-        if use_majority_vote_popularity:
-            print("hypothesis selected based on feature popularity.")
-        elif use_majority_vote_feature_score:
-            print("hypothesis selected based on feature predicted scores.")
-        else:
-            print("hypothesis selected based on original score and filtering methods.")
-
-        # need to load some mappings
-        id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
-        feature2id_file = '../../Dataset/ratebeer/{}/train/feature/feature2id.json'.format(dataset_name)
-        trainset_id2sent_file = '../../Dataset/ratebeer/{}/train/sentence/id2sentence.json'.format(dataset_name)
-        testset_id2sent_file = '../../Dataset/ratebeer/{}/test/sentence/id2sentence.json'.format(dataset_name)
-        # testset_sentid2feature_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2feature.json'.format(dataset_name)
-        # trainset_useritem_pair_file = '../../Dataset/ratebeer/{}/train/useritem_pairs.json'.format(dataset_name)
-        testset_useritem_cdd_withproxy_file = '../../Dataset/ratebeer/{}/test/useritem2sentids_withproxy.json'.format(dataset_name)
-        trainset_user2featuretf_file = '../../Dataset/ratebeer/{}/train/user/user2featuretf.json'.format(dataset_name)
-        trainset_item2featuretf_file = '../../Dataset/ratebeer/{}/train/item/item2featuretf.json'.format(dataset_name)
-        trainset_sentid2featuretf_file = '../../Dataset/ratebeer/{}/train/sentence/sentence2featuretf.json'.format(dataset_name)
-        testset_sentid2featuretf_file = '../../Dataset/ratebeer/{}/test/sentence/sentence2featuretf.json'.format(dataset_name)
-        trainset_user2sentid_file = '../../Dataset/ratebeer/{}/train/user/user2sentids.json'.format(dataset_name)
-        trainset_item2sentid_file = '../../Dataset/ratebeer/{}/train/item/item2sentids.json'.format(dataset_name)
-        trainset_sentid2featuretfidf_file = '../../Dataset/ratebeer/{}/train/sentence/sentence2feature.json'.format(dataset_name)
-        with open(id2feature_file, 'r') as f:
-            print("Load file: {}".format(id2feature_file))
-            self.d_id2feature = json.load(f)
-        with open(feature2id_file, 'r') as f:
-            print("Load file: {}".format(feature2id_file))
-            self.d_feature2id = json.load(f)
-        with open(trainset_id2sent_file, 'r') as f:
-            print("Load file: {}".format(trainset_id2sent_file))
-            self.d_trainset_id2sent = json.load(f)
-        with open(testset_id2sent_file, 'r') as f:
-            print("Load file: {}".format(testset_id2sent_file))
-            self.d_testset_id2sent = json.load(f)
-        # with open(testset_sentid2feature_file, 'r') as f:
-        #     print("Load file: {}".format(testset_sentid2feature_file))
-        #     self.d_testsetsentid2feature = json.load(f)
-        # with open(trainset_useritem_pair_file, 'r') as f:
-        #     print("Load file: {}".format(trainset_useritem_pair_file))
-        #     self.d_trainset_useritempair = json.load(f)
-        with open(testset_useritem_cdd_withproxy_file, 'r') as f:
-            print("Load file: {}".format(testset_useritem_cdd_withproxy_file))
-            self.d_testset_useritem_cdd_withproxy = json.load(f)
-        # Load trainset user to feature tf-value dict
-        with open(trainset_user2featuretf_file, 'r') as f:
-            print("Load file: {}".format(trainset_user2featuretf_file))
-            self.d_trainset_user2featuretf = json.load(f)
-        # Load trainset item to feature tf-value dict
-        with open(trainset_item2featuretf_file, 'r') as f:
-            print("Load file: {}".format(trainset_item2featuretf_file))
-            self.d_trainset_item2featuretf = json.load(f)
-        # Load trainset sentence id to feature tf-value dict
-        with open(trainset_sentid2featuretf_file, 'r') as f:
-            print("Load file: {}".format(trainset_sentid2featuretf_file))
-            self.d_trainset_sentid2featuretf = json.load(f)
-        # Load testset sentence id to feature tf-value dict
-        with open(testset_sentid2featuretf_file, 'r') as f:
-            print("Load file: {}".format(testset_sentid2featuretf_file))
-            self.d_testset_sentid2featuretf = json.load(f)
-        # Load trainset user to sentence id dict
-        with open(trainset_user2sentid_file, 'r') as f:
-            print("Load file: {}".format(trainset_user2sentid_file))
-            self.d_trainset_user2sentid = json.load(f)
-        # Load trainset item to sentence id dict
-        with open(trainset_item2sentid_file, 'r') as f:
-            print("Load file: {}".format(trainset_item2sentid_file))
-            self.d_trainset_item2sentid = json.load(f)
-        # Load trainset sentence id to feature tf-idf value dict
-        with open(trainset_sentid2featuretfidf_file, 'r') as f:
-            print("Load file: {}".format(trainset_sentid2featuretfidf_file))
-            self.d_trainset_sentid2featuretfidf = json.load(f)
-        # Get trainset sid2featuretf dict
-
-        # Get the sid2featuretf dict (on Valid/Test Set)
-        self.d_testset_sid2featuretf = self.get_sid2featuretf_eval(
-            self.d_testset_sentid2featuretf, self.m_sent2sid, self.m_train_sent_num)
-        # Get the sid2feature dict (on Train Set)
-        self.d_trainset_sid2feature = self.get_sid2feature_train(
-            self.d_trainset_sentid2featuretfidf, self.m_sent2sid)
-
-        # save sid2words mapping
-        if save_predict:
-            self.this_DIR = '../data_postprocess/{}'.format(dataset_name)
-            if not os.path.isdir(self.this_DIR):
-                os.makedirs(self.this_DIR)
-                print("create folder: {}".format(self.this_DIR))
-            else:
-                print("{} folder already exists.".format(self.this_DIR))
-            this_mapping_file = os.path.join(self.this_DIR, 'sid2swords.pickle')
-            with open(this_mapping_file, 'wb') as handle:
-                pickle.dump(self.m_sid2swords, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        print("Dataset: {}".format(dataset_name))
 
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
@@ -190,10 +56,10 @@ class EVAL(object):
 
         self.m_network = network
 
-    def f_eval(self, train_data, eval_data):
-        print("eval new")
+    def f_eval(self, train_data, valid_data, test_data):
+        print("start eval ...")
         # self.f_cluster_embedding()
-        self.f_eval_new(train_data, eval_data)
+        self.f_eval_new(train_data, valid_data, test_data)
 
     def f_cluster_embedding(self):
 
@@ -264,319 +130,74 @@ class EVAL(object):
 
         print("Finish clustering")
 
-    def f_eval_new(self, train_data, eval_data):
-        """ TODO:
-        1. Save Predict/Selected sentences and Reference sentences to compute BLEU using the perl script.
-        2. Add mojority vote based baselines.
-        3. Seperate code chunks into functions.
-        """
-        rouge_1_f_list = []
-        rouge_1_p_list = []
-        rouge_1_r_list = []
-
-        rouge_2_f_list = []
-        rouge_2_p_list = []
-        rouge_2_r_list = []
-
-        rouge_l_f_list = []
-        rouge_l_p_list = []
-        rouge_l_r_list = []
-
-        bleu_list = []
-        bleu_1_list = []
-        bleu_2_list = []
-        bleu_3_list = []
-        bleu_4_list = []
+    def f_eval_new(self, train_data, valid_data, test_data):
+        rouge_1_f_list, rouge_1_p_list, rouge_1_r_list = [], [], []
+        rouge_2_f_list, rouge_2_p_list, rouge_2_r_list = [], [], []
+        rouge_l_f_list, rouge_l_p_list, rouge_l_r_list = [], [], []
+        bleu_list, bleu_1_list, bleu_2_list, bleu_3_list, bleu_4_list = [], [], [], [], []
 
         rouge = Rouge()
-
-        num_sents_per_target_review = []        # number of sentences for each ui-pair's gt review
-        # num_features_per_target_review = []     # number of features for each ui-pair's gt review
-        # num_unique_features_per_target = []     # number of unique features per ui-pair'g gt review
-        # num_sents_per_proxy_review = []         # number of sentences for each ui-pair's proxies
-        # num_features_per_proxy_review = []      # number of features for each ui-pair's proxies
-        # num_unique_features_per_proxy = []      # number of unique features per ui-pair's gt review
 
         train_ui_pair_saved_cnt = 0
         test_ui_pair_saved_cnt = 0
 
         print('--'*10)
 
-        # debug_index = 0
-        s_topk = 3
-        s_topk_candidate = 20
-
-        # already got feature2fid mapping, need the reverse
-        self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
-        # print(self.m_feture2fid)
-
         cnt_useritem_pair = 0
         cnt_useritem_batch = 0
-        # train_test_overlap_cnt = 0
-        # train_test_differ_cnt = 0
         save_logging_cnt = 0
+        # set teacher forcing ratio to be 0.0
+        self.m_network.set_tf_ratio(0.0)
         self.m_network.eval()
         with torch.no_grad():
-            print("Number of training data: {}".format(len(train_data)))
-            print("Number of evaluation data: {}".format(len(eval_data)))
+            print("Number of train data (batch): {}".format(len(train_data)))
+            print("Number of valid data (batch): {}".format(len(valid_data)))
+            print("Number of test data (batch): {}".format(len(test_data)))
             # Perform Evaluation on eval_data / train_data
-            for graph_batch in eval_data:
+            for test_batch in test_data:
                 if cnt_useritem_batch % 100 == 0:
                     print("... eval ... ", cnt_useritem_batch)
+                user_batch = test_batch.user
+                item_batch = test_batch.item
+                # de-activate rating for yelp dataset
+                # rating_batch = test_batch.rating
+                rating_batch = None
+                text_batch = test_batch.text
+                batch_size = user_batch.shape[0]
 
-                graph_batch = graph_batch.to(self.m_device)
+                output = self.m_network.eval_forward(user_batch, item_batch, rating_batch, text_batch)
+                output_dim = output.shape[-1]
+                seq_length_output = output.shape[0]
+                seq_length_gt = text_batch.shape[0]
+                seq_length_this_batch = min(seq_length_output, seq_length_gt)
+                pred_output = output[1:seq_length_this_batch].view(-1, output_dim)
+                gt_text = text_batch[1:seq_length_this_batch].view(-1)
 
-                # logits: batch_size*max_sen_num
-                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels, hidden_f_batch = self.m_network.eval_forward(graph_batch)
-                batch_size = s_logits.size(0)
-
-                # Save the predict logits and sids
-                # if save_predict:
-                #     userid_batch = graph_batch.u_rawid
-                #     itemid_batch = graph_batch.i_rawid
-                #     for i in range(batch_size):
-                #         current_result_dict = {}
-                #         current_result_dict['user_id'] = userid_batch[i].item()
-                #         current_result_dict['item_id'] = itemid_batch[i].item()
-                #         assert len(s_logits[i]) == len(sids[i])
-                #         assert len(s_logits[i]) == len(s_masks[i])
-                #         triple_data_list = []
-                #         for pos in range(len(s_logits[i])):
-                #             triple_data_list.append(
-                #                 [s_logits[i][pos].item(), sids[i][pos].item(), s_masks[i][pos].item()])
-                #         current_result_dict['predict_data'] = triple_data_list
-                #         current_target_sent_sids = []
-                #         for this_sid in target_sids[i]:
-                #             current_target_sent_sids.append(this_sid.item())
-                #         current_result_dict['target'] = current_target_sent_sids
-
-                #         # save current_result_dict into json file
-                #         model_ckpt_name = self.m_model_file.split('.')[0]
-                #         this_json_file = os.path.join(self.this_DIR, 'result_{}.json'.format(model_ckpt_name))
-                #         with open(this_json_file, 'a') as f:
-                #             json.dump(current_result_dict, f)
-                #             f.write("\n")
-                #     continue
-
-                if random_sampling:
-                    userid_batch = graph_batch.u_rawid
-                    itemid_batch = graph_batch.i_rawid
-                    for i in range(batch_size):
-                        # current_result_dict = {}
-                        # current_result_dict['user_id'] = self.m_uid2user[userid_batch[i].item()]
-                        # current_result_dict['item_id'] = self.m_iid2item[itemid_batch[i].item()]
-                        assert s_logits[i].size(0) == sids[i].size(0)
-                        assert s_logits[i].size(0) == s_masks[i].size(0)
-                        current_cdd_sent_sids = []
-                        current_target_sent_sids = []
-                        num_sent = int(sum(s_masks[i]).item())
-                        for pos in range(num_sent):
-                            current_cdd_sent_sids.append(sids[i][pos].item())
-                        for this_sid in target_sids[i]:
-                            current_target_sent_sids.append(this_sid.item())
-                        # randomly sample 3 sentences
-                        sampled_cdd_sent_sids = random.sample(current_cdd_sent_sids, 3)
-                        # get the content
-                        refs_j_list = []
-                        hyps_j_list = []
-                        for sid_cur in current_target_sent_sids:
-                            refs_j_list.append(self.m_sid2swords[sid_cur])
-                        for sid_cur in sampled_cdd_sent_sids:
-                            hyps_j_list.append(self.m_sid2swords[sid_cur])
-                        hyps_j = " ".join(hyps_j_list)
-                        refs_j = " ".join(refs_j_list)
-                        num_sents_per_target_review.append(len(current_target_sent_sids))
-
-                        if save_hyps_refs:
-                            # Save refs and selected hyps into file for later ROUGE/BLEU computation
-                            refs_file = os.path.join(self.m_eval_output_path, 'reference.txt')
-                            hyps_file = os.path.join(self.m_eval_output_path, 'hypothesis.txt')
-                            with open(refs_file, 'a') as f_ref:
-                                f_ref.write(refs_j)
-                                f_ref.write("\n")
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_j)
-                                f_hyp.write("\n")
-
-                        if compute_rouge_score:
-                            scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
-                            # ROUGE-1
-                            rouge_1_f_list.append(scores_j["rouge-1"]["f"])
-                            rouge_1_r_list.append(scores_j["rouge-1"]["r"])
-                            rouge_1_p_list.append(scores_j["rouge-1"]["p"])
-                            # ROUGE-2
-                            rouge_2_f_list.append(scores_j["rouge-2"]["f"])
-                            rouge_2_r_list.append(scores_j["rouge-2"]["r"])
-                            rouge_2_p_list.append(scores_j["rouge-2"]["p"])
-                            # ROUGE-L
-                            rouge_l_f_list.append(scores_j["rouge-l"]["f"])
-                            rouge_l_r_list.append(scores_j["rouge-l"]["r"])
-                            rouge_l_p_list.append(scores_j["rouge-l"]["p"])
-
-                        if compute_bleu_score:
-                            bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
-                            bleu_list.append(bleu_scores_j)
-                            # NLTK BLEU
-                            bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
-                            bleu_1_list.append(bleu_1_scores_j)
-                            bleu_2_list.append(bleu_2_scores_j)
-                            bleu_3_list.append(bleu_3_scores_j)
-                            bleu_4_list.append(bleu_4_scores_j)
-
-                    cnt_useritem_batch += 1
-                    continue
-
-                # elif get_statistics:
-                #     for i in range(batch_size):
-                #         this_g = graph_batch[i]
-                #         labels_feature = this_g.f_label
-                #         print("shape of feature labels: {}".format(labels_feature.shape))
-                #         num_features_per_target_review.append(torch.sum(labels_feature).item())
-                #     continue
-
-                elif use_blocking:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate
-                    )
-                elif use_filtering:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.bleu_filtering_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate, bleu_bound=bleu_filter_value
-                    )
-                else:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.origin_blocking_sent_prediction(
-                        s_logits, sids, s_masks, topk=s_topk, topk_cdd=s_topk_candidate
-                    )
-
-                userid = graph_batch.u_rawid
-                itemid = graph_batch.i_rawid
+                # convert tensor to text
+                gt_sentences, pred_sentences = self.convert_tensor_to_text(text_batch, output[1:])
+                assert len(gt_sentences) == batch_size
+                assert len(pred_sentences) == batch_size
 
                 # Decide the batch_save_flag. To get shorted results, we only print the first several batches' results
                 cnt_useritem_batch += 1
-                if cnt_useritem_batch <= MAX_batch_output:
-                    batch_save_flag = True
-                else:
-                    batch_save_flag = False
-                # Whether to break or continue(i.e. pass) when the batch_save_flag is false
-                if batch_save_flag:
-                    save_logging_cnt += 1
-                else:
-                    # pass or break. pass will continue evaluating full batch testing set, break will only
-                    # evaluate the first several batches of the testing set.
-                    # pass
-                    break
+                # if cnt_useritem_batch <= MAX_batch_output:
+                #     batch_save_flag = True
+                # else:
+                #     batch_save_flag = False
+                # # Whether to break or continue(i.e. pass) when the batch_save_flag is false
+                # if batch_save_flag:
+                #     save_logging_cnt += 1
+                # else:
+                #     # pass or break. pass will continue evaluating full batch testing set, break will only
+                #     # evaluate the first several batches of the testing set.
+                #     pass
+                #     # break
 
                 for j in range(batch_size):
-                    userid_j = userid[j].item()
-                    itemid_j = itemid[j].item()
-                    # get the true user/item id
-                    true_userid_j = self.m_uid2user[userid_j]
-                    true_itemid_j = self.m_iid2item[itemid_j]
-
-                    refs_j_list = []
-                    hyps_j_list = []
-                    hyps_featureid_j_list = []
-                    for sid_k in target_sids[j]:
-                        refs_j_list.append(self.m_sid2swords[sid_k.item()])
-
-                    for sid_k in s_pred_sids[j]:
-                        hyps_j_list.append(self.m_sid2swords[sid_k.item()])
-                        hyps_featureid_j_list.extend(self.d_trainset_sid2feature[sid_k.item()])
-
-                    hyps_num_unique_features = len(set(hyps_featureid_j_list))
-
-                    hyps_j = " ".join(hyps_j_list)
-                    refs_j = " ".join(refs_j_list)
-
-                    # proxy_j_list = []
-                    # # get the proxy's sentences' id.
-                    # # NOTE: proxy sentences' id is on the trainset
-                    # for sid_k in self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][-1]:
-                    #     proxy_j_list.append(self.d_trainset_id2sent[sid_k])
-                    # proxy_j = " ".join(proxy_j_list)
-
-                    # add the number of sentences of the gt review
-                    # num_sents_per_target_review.append(len(refs_j_list))
-                    # add the number of sentences of the proxy review
-                    # num_sents_per_proxy_review.append(len(proxy_j_list))
-
-                    # Get the featureid and feature logits
-                    f_logits_j = f_logits[j]
-                    fid_j = fids[j].cpu()
-                    hidden_f_batch_j = hidden_f_batch[j].cpu()
-                    # print("f_logits_j: {}".format(f_logits_j.shape))
-                    # print("fid_j: {}".format(fid_j.shape))
-                    # print("hidden_f_batch_j: {}".format(hidden_f_batch_j.shape))
-                    # mask_f_j = f_masks[j].cpu()
-                    target_f_labels_j = target_f_labels[j].cpu()
-                    # print("target f albels, shape: {}".format(target_f_labels_j.shape))
-                    # print("target f labels: {}".format(target_f_labels_j.squeeze()))
-                    f_num_j = target_f_labels_j.size(0)
-                    mask_f_logits_j = f_logits_j[:f_num_j].cpu()
-                    mask_fid_j = fid_j[:f_num_j]
-                    mask_featureid_j = [self.m_fid2feature[this_f_id.item()] for this_f_id in mask_fid_j]
-                    mask_hidden_f_j = hidden_f_batch_j[:f_num_j]
-                    # print("mask_f_logits: {}".format(mask_f_logits_j.shape))
-                    # print("mask_fid_j: {}".format(mask_fid_j.shape))
-                    # print("mask_hidden_f_j: {}".format(mask_hidden_f_j.shape))
-
-                    if save_train_feature_hidden:
-                        # Only save 10% of the data from train set
-                        if random.random() <= percentage_train_data_saved:
-                            # Form the feature hidden f tensor with label
-                            f_hidden_train_file = os.path.join(self.m_eval_output_path, 'train_f_hidden.json')
-                            with open(f_hidden_train_file, 'a') as f_h:
-                                for f_idx in range(f_num_j):
-                                    cur_dict = dict()
-                                    cur_hidden_f = mask_hidden_f_j[f_idx].detach().numpy()
-                                    cur_f_label = target_f_labels_j[f_idx].detach().numpy()
-                                    cur_hidden_f_data = np.append(cur_hidden_f, cur_f_label)
-                                    cur_hidden_f_data = cur_hidden_f_data.tolist()
-                                    cur_dict['ui_pair_index'] = cnt_useritem_pair
-                                    cur_dict['f_hidden'] = cur_hidden_f_data
-                                    # Save this dict into json file
-                                    json.dump(cur_dict, f_h)
-                                    f_h.write('\n')
-                            train_ui_pair_saved_cnt += 1
-
-                    if save_test_feature_hidden:
-                        # Form the feature hidden f tensor with label
-                        f_hidden_test_file = os.path.join(self.m_eval_output_path, 'test_f_hidden.json')
-                        with open(f_hidden_test_file, 'a') as f_h:
-                            # Need the gt-feature id of this user-item pair
-                            gt_featureid_j, _ = self.get_gt_review_featuretf(
-                                self.d_testset_sid2featuretf, target_sids[j])
-                            cur_test_user_item_f_hidden = dict()
-                            cur_test_user_item_f_hidden['ui_pair_index'] = cnt_useritem_pair
-                            f_hidden_np = []
-                            for f_idx in range(f_num_j):
-                                cur_f_hidden_np = []
-                                cur_f_hidden_np.append(int(mask_featureid_j[f_idx]))
-                                cur_f_hidden_np.extend(mask_hidden_f_j[f_idx].detach().numpy().tolist())
-                                f_hidden_np.append(cur_f_hidden_np)
-                            cur_test_user_item_f_hidden['feature'] = f_hidden_np
-                            cur_test_user_item_f_hidden['gt'] = gt_featureid_j
-                            cur_test_user_item_f_hidden['topk'] = hyps_num_unique_features
-                            # Save this dict into json file
-                            json.dump(cur_test_user_item_f_hidden, f_h)
-                            f_h.write('\n')
-                        test_ui_pair_saved_cnt += 1
-
-                    cnt_useritem_pair += 1
-
-                    if save_sentence_selected and batch_save_flag:
-                        self.save_predict_sentences(
-                            true_userid=true_userid_j,
-                            true_itemid=true_itemid_j,
-                            refs_sent=refs_j,
-                            hyps_sent=hyps_j,
-                            topk_logits=s_topk_logits[j],
-                            pred_sids=s_pred_sids[j],
-                            top_cdd_logits=s_top_cdd_logits[j],
-                            top_cdd_pred_sids=s_top_cdd_pred_sids[j],
-                            bottom_cdd_logits=s_bottom_cdd_logits[j],
-                            bottom_cdd_pred_sids=s_bottom_cdd_pred_sids[j],
-                            s_topk_candidate=20
-                        )
+                    hyps_j = pred_sentences[j]
+                    refs_j = gt_sentences[j]
+                    if hyps_j == '':
+                        hyps_j = self.m_vocab.unk_token
 
                     if save_hyps_refs:
                         # Compute ROUGE/BLEU score
@@ -586,47 +207,9 @@ class EVAL(object):
                         with open(refs_file, 'a') as f_ref:
                             f_ref.write(refs_j)
                             f_ref.write("\n")
-                        if use_majority_vote_popularity:
-                            cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                            hyps_pop, _, _ = self.majority_vote_popularity(
-                                true_userid_j, true_itemid_j, cur_cdd_sents, topk=s_topk)
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_pop)
-                                f_hyp.write("\n")
-                        elif use_majority_vote_feature_score:
-                            cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                            hyps_f_score, _, _, _ = self.majority_vote_predicted_feature(
-                                true_userid_j, true_itemid_j, cur_cdd_sents, mask_f_logits_j, mask_featureid_j, topk=s_topk)
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_f_score)
-                                f_hyp.write("\n")
-                        else:
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_j)
-                                f_hyp.write("\n")
-
-                    if use_majority_vote_popularity and not save_hyps_refs:
-                        cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                        hyps_pop, _, topk_cdd_scores, hyps_sent_feature_scores = self.majority_vote_popularity(
-                            true_userid_j, true_itemid_j, cur_cdd_sents, topk=s_topk)
-                        popu_log_file = os.path.join(self.m_eval_output_path, 'popularity_majority_vote.txt')
-                        with open(popu_log_file, 'a') as f_popu:
-                            f_popu.write("User: {0}\tItem: {1}\n".format(true_userid_j, true_itemid_j))
-                            f_popu.write("Refs: {}\n".format(refs_j))
-                            f_popu.write("Hyps: {}\n".format(hyps_pop))
-                            f_popu.write("Hyps sent scores: {}\n".format(topk_cdd_scores.numpy().tolist()))
-                            # write feature weighted scores
-                            for featureid_score_dict in hyps_sent_feature_scores:
-                                featureword_score_dict = dict()
-                                for key, value in featureid_score_dict.items():
-                                    assert isinstance(key, str)
-                                    featureid = key
-                                    featureword = self.d_id2feature[featureid]
-                                    featureword_score_dict[featureword] = value
-                                # write this featureword-score dict into file
-                                f_popu.write(json.dumps(featureword_score_dict))
-                                f_popu.write("\n")
-                            f_popu.write("========================================\n")
+                        with open(hyps_file, 'a') as f_hyp:
+                            f_hyp.write(hyps_j)
+                            f_hyp.write("\n")
 
                     if compute_rouge_score:
                         scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
@@ -654,8 +237,6 @@ class EVAL(object):
                         bleu_3_list.append(bleu_3_scores_j)
                         bleu_4_list.append(bleu_4_scores_j)
 
-                # exit()
-
         if compute_rouge_score:
             self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
             self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
@@ -676,23 +257,12 @@ class EVAL(object):
             self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
             self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
 
-        # if len(num_sents_per_target_review) != 0:
-        #     self.m_mean_num_sents_per_target_review = np.mean(num_sents_per_target_review)
-        #     print("Number of sentences for each target review (on average): {}".format(
-        #         self.m_mean_num_sents_per_target_review))
-
         print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
-            len(eval_data), cnt_useritem_pair, save_logging_cnt
-        ))
-        print("Totally {0} train ui-pairs and the corresponding feature hidden embeddings are saved.".format(
-            train_ui_pair_saved_cnt
-        ))
-        print("Totally {0} test ui-pairs and the corresponding feature hidden embeddings are saved.".format(
-            test_ui_pair_saved_cnt
+            len(test_data), cnt_useritem_pair, save_logging_cnt
         ))
 
-        if compute_rouge_score and compute_bleu_score:
-            print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f" % (
+        if compute_rouge_score:
+            print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-L:|f:%.4f |p:%.4f |r:%.4f" % (
                 self.m_mean_eval_rouge_1_f,
                 self.m_mean_eval_rouge_1_p,
                 self.m_mean_eval_rouge_1_r,
@@ -702,34 +272,72 @@ class EVAL(object):
                 self.m_mean_eval_rouge_l_f,
                 self.m_mean_eval_rouge_l_p,
                 self.m_mean_eval_rouge_l_r))
+        if compute_bleu_score:
             print("bleu:%.4f" % (self.m_mean_eval_bleu))
             print("bleu-1:%.4f" % (self.m_mean_eval_bleu_1))
             print("bleu-2:%.4f" % (self.m_mean_eval_bleu_2))
             print("bleu-3:%.4f" % (self.m_mean_eval_bleu_3))
             print("bleu-4:%.4f" % (self.m_mean_eval_bleu_4))
 
-            metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(dataset_name, label_format))
+            metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}.txt'.format(dataset_name))
             with open(metric_log_file, 'w') as f:
-                print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n" % (
-                    self.m_mean_eval_rouge_1_f,
-                    self.m_mean_eval_rouge_1_p,
-                    self.m_mean_eval_rouge_1_r,
-                    self.m_mean_eval_rouge_2_f,
-                    self.m_mean_eval_rouge_2_p,
-                    self.m_mean_eval_rouge_2_r,
-                    self.m_mean_eval_rouge_l_f,
-                    self.m_mean_eval_rouge_l_p,
-                    self.m_mean_eval_rouge_l_r), file=f)
-                print("bleu:%.4f\n" % (self.m_mean_eval_bleu), file=f)
-                print("bleu-1:%.4f\n" % (self.m_mean_eval_bleu_1), file=f)
-                print("bleu-2:%.4f\n" % (self.m_mean_eval_bleu_2), file=f)
-                print("bleu-3:%.4f\n" % (self.m_mean_eval_bleu_3), file=f)
-                print("bleu-4:%.4f\n" % (self.m_mean_eval_bleu_4), file=f)
-                # print("Total number of user-item on testset (not appear in trainset): {}\n".format(train_test_differ_cnt), file=f)
-                # print("Total number of user-item on testset (appear in trainset): {}\n".format(train_test_overlap_cnt), file=f)
-                # if len(num_sents_per_target_review) != 0:
-                #     print("Number of sentences for each target review (on average): {}".format(
-                #         self.m_mean_num_sents_per_target_review), file=f)
+                if compute_rouge_score:
+                    print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n" % (
+                        self.m_mean_eval_rouge_1_f,
+                        self.m_mean_eval_rouge_1_p,
+                        self.m_mean_eval_rouge_1_r,
+                        self.m_mean_eval_rouge_2_f,
+                        self.m_mean_eval_rouge_2_p,
+                        self.m_mean_eval_rouge_2_r,
+                        self.m_mean_eval_rouge_l_f,
+                        self.m_mean_eval_rouge_l_p,
+                        self.m_mean_eval_rouge_l_r), file=f)
+                if compute_bleu_score:
+                    print("bleu:%.4f\n" % (self.m_mean_eval_bleu), file=f)
+                    print("bleu-1:%.4f\n" % (self.m_mean_eval_bleu_1), file=f)
+                    print("bleu-2:%.4f\n" % (self.m_mean_eval_bleu_2), file=f)
+                    print("bleu-3:%.4f\n" % (self.m_mean_eval_bleu_3), file=f)
+                    print("bleu-4:%.4f\n" % (self.m_mean_eval_bleu_4), file=f)
+
+    def convert_tensor_to_text(self, review_data, pred_data):
+        """ Convert tensor type review and prediction into raw text
+        :param: review_data:
+        :param: pred_data:
+        :return:
+            gt_sentences
+            pred_sentences
+        """
+        # Convert tensor into batch-first format
+        review_idx = torch.transpose(review_data, 0, 1)
+        # Get the predict token from the predicted logits and then convert to batch-first
+        _, pred_idx = pred_data.max(2)
+        pred_idx = torch.transpose(pred_idx, 0, 1)
+
+        gt_sentences = []
+        pred_sentences = []
+        # mapping the idx to word tokens and then forms the sentences
+        for token_ids in review_idx:
+            current = []
+            for id in token_ids.detach().cpu().numpy():
+                if id == self.m_vocab.pad_token_id or id == self.m_vocab.sos_token_id:
+                    pass
+                elif id == self.m_vocab.eos_token_id:
+                    break
+                else:
+                    current.append(self.m_vocab.m_textvocab.itos[id])
+            gt_sentences.append(" ".join(current))
+        for token_ids in pred_idx:
+            current = []
+            for id in token_ids.detach().cpu().numpy():
+                if id == self.m_vocab.pad_token_id or id == self.m_vocab.sos_token_id:
+                    pass
+                elif id == self.m_vocab.eos_token_id:
+                    break
+                else:
+                    current.append(self.m_vocab.m_textvocab.itos[id])
+            pred_sentences.append(" ".join(current))
+
+        return gt_sentences, pred_sentences
 
     def ngram_blocking(self, sents, p_sent, n_win, k):
         """ ngram blocking

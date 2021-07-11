@@ -5,16 +5,15 @@ from torchtext import data
 
 class Vocab():
     def __init__(
-            self, user_vocab, item_vocab, text_vocab,
-            train_data, valid_data, test_data, text_field):
+            self, user_vocab, item_vocab, text_vocab, text_field):
         # user/item/text vocab
         self.m_uservocab = user_vocab
         self.m_itemvocab = item_vocab
         self.m_textvocab = text_vocab
         # train/valid/test data
         # self.m_train_data = train_data
-        self.m_valid_data = valid_data
-        self.m_test_data = test_data
+        # self.m_valid_data = valid_data
+        # self.m_test_data = test_data
         # text field
         self.m_text_field = text_field
         # get special tokens and corresponding ids

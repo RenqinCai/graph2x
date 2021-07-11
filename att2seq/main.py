@@ -112,10 +112,10 @@ def main(args):
         print("="*10, "eval", "="*10)
         print("Start evaluation...")
         network.set_tf_ratio(0.0)       # teacher forcing ratio should be assigned as 0
-        eval_obj = EVAL(vocab_obj, args, device)
+        eval_obj = EVAL(args, device, vocab_obj)
         network = network.to(device)
         eval_obj.f_init_eval(network, args.model_file, reload_model=True)
-        eval_obj.f_eval(train_data, valid_data)
+        eval_obj.f_eval(train_data, valid_data, test_data)
 
 
 if __name__ == "__main__":
@@ -136,7 +136,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--min_freq', type=int, default=5)
     parser.add_argument('--max_length', type=int, default=100)
-    parser.add_argument('--max_vocab', type=int, default=15000)
+    parser.add_argument('--max_vocab', type=int, default=20000)
     parser.add_argument('--rating_range', type=int, default=20)
 
     ### model

@@ -76,7 +76,9 @@ class TRAINER(object):
                 # valid epoch, this should be applied before and 1st training epoch
                 # so that we can eval the untrained model
                 s_time = datetime.datetime.now()
+                # using valid/test to perform validation
                 self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
+                # self.f_eval_epoch(test_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
                 print("valid epoch duration", e_time-s_time)
 
@@ -122,18 +124,19 @@ class TRAINER(object):
 
                 # whether should we save this model based on the bleu score
                 if best_eval_bleu < self.m_mean_eval_bleu:
-                    print("... saving model ...")
+                    print("Epoch {} ... saving model ...".format(epoch))
                     checkpoint = {'model': network.state_dict()}
                     self.f_save_model(checkpoint)
                     best_eval_bleu = self.m_mean_eval_bleu
 
             s_time = datetime.datetime.now()
             self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
+            # self.f_eval_epoch(test_data, network, optimizer, logger_obj)
             e_time = datetime.datetime.now()
             print("valid epoch duration", e_time-s_time)
             # whether should we save this model based on the bleu score
             if best_eval_bleu < self.m_mean_eval_bleu:
-                print("... saving model ...")
+                print("Epoch {} ... saving model ...".format(epoch))
                 checkpoint = {'model': network.state_dict()}
                 self.f_save_model(checkpoint)
                 best_eval_bleu = self.m_mean_eval_bleu
@@ -157,6 +160,11 @@ class TRAINER(object):
             e_time = datetime.datetime.now()
             print("valid epoch duration", e_time-s_time)
 
+            s_time = datetime.datetime.now()
+            self.f_eval_epoch(test_data, network, optimizer, logger_obj)
+            e_time = datetime.datetime.now()
+            print("test epoch duration", e_time-s_time)
+
             print(" done !!!")
 
     def f_train_epoch(self, train_data, network, optimizer, logger_obj):
@@ -173,41 +181,28 @@ class TRAINER(object):
         for train_batch in train_data:
             user_batch = train_batch.user
             item_batch = train_batch.item
-            rating_batch = train_batch.rating
+            # de-activate rating
+            # rating_batch = train_batch.rating
+            rating_batch = None
             text_batch = train_batch.text
-            start_time = time.time()
             output = network(user_batch, item_batch, rating_batch, text_batch)
-            end_time = time.time()
-            forward_time = end_time - start_time
             output_dim = output.shape[-1]
-            pred_output = output[1:].view(-1, output_dim)
+            pred_output = output.view(-1, output_dim)
             gt_text = text_batch[1:].view(-1)
             # compute loss (Cross Entropy)
-            start_time = time.time()
             loss = self.m_criterion(pred_output, gt_text)
-            end_time = time.time()
-            loss_time = end_time - start_time
             # add current loss
-            start_time = time.time()
             loss_list.append(loss.item())
             tmp_loss_list.append(loss.item())
             optimizer.zero_grad()
             loss.backward()
-
             if self.m_grad_clip:
                 max_norm = 5.0
                 torch.nn.utils.clip_grad_norm_(network.parameters(), max_norm)
 
             optimizer.step()
-            end_time = time.time()
-            optimizer_time = end_time - start_time
 
             self.m_train_iteration += 1
-
-            print("Forward compute time: {0} \t Loss compute time: {1} \t Optim compute time: {2}".format(
-                    forward_time, loss_time, optimizer_time
-                )
-            )
 
             iteration += 1
             if iteration % self.m_print_interval == 0:
@@ -218,8 +213,6 @@ class TRAINER(object):
                 )
 
                 tmp_loss_list = []
-                # shorten the training procedure
-                break
 
         logger_obj.f_add_output2IO(
             "%d, loss:%.4f" % (
@@ -257,7 +250,9 @@ class TRAINER(object):
                 i += 1
                 user_batch = eval_batch.user
                 item_batch = eval_batch.item
-                rating_batch = eval_batch.rating
+                # de-activate rating
+                # rating_batch = eval_batch.rating
+                rating_batch = None
                 text_batch = eval_batch.text
                 batch_size = user_batch.shape[0]
 
@@ -376,7 +371,10 @@ class TRAINER(object):
                     break
                 else:
                     current.append(self.m_vocab.m_textvocab.itos[id])
-            gt_sentences.append(" ".join(current))
+            if len(current) == 0:
+                gt_sentences.append(self.m_vocab.unk_token)
+            else:
+                gt_sentences.append(" ".join(current))
         for token_ids in pred_idx:
             current = []
             for id in token_ids.detach().cpu().numpy():
