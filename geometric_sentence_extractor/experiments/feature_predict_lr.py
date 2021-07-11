@@ -5,7 +5,6 @@ import numpy as np
 from sklearn import metrics
 import json
 
-
 def readJson(fname):
     data = []
     line_num = 0
@@ -18,7 +17,6 @@ def readJson(fname):
             except:
                 print("error", line_num)
     return data
-
 
 def load_train_feature_label(feature_label_file):
     x = []
@@ -35,7 +33,6 @@ def load_train_feature_label(feature_label_file):
     y = np.array(y)
     print("x size", x.shape)
     print("y size", y.shape)
-
 
 def load_test_feature_label(feature_label_file):
     x = []
@@ -82,7 +79,6 @@ def train_model(x, y):
     clf = LogisticRegression(random_state=0).fit(x, y)
     
     return clf
-
 
 def iterate_eval_model(model, x_ids, x, y, test_topk_num):
     pair_num = len(x)
