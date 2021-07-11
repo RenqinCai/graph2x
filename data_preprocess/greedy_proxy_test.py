@@ -96,12 +96,14 @@ def calLabel(article, abstract):
         scores.append(mean_score)
         result_rouge_scores.append(result_scores)
 
-    selected = [int(np.argmax(scores))]
+    # A set of index of the selected proxy sentences
+    selected = set([int(np.argmax(scores))])
     selected_sent_cnt = 1
 
     best_rouge = np.max(scores)
-    best_result_rouge_score = result_rouge_scores[selected[0]]
-    best_hyps = hyps_list[selected[0]]
+    cur_selected_idx = list(selected)[0]
+    best_result_rouge_score = result_rouge_scores[cur_selected_idx]
+    best_hyps = hyps_list[cur_selected_idx]
 
     # # if the true review is empty, the best rouge score can only be 0.0
     # if best_rouge == 0.0:
@@ -118,8 +120,8 @@ def calLabel(article, abstract):
         for i in range(len(hyps_list)):
             if i not in selected:
                 temp = copy.deepcopy(selected)
-                temp.append(i)
-                hyps = " ".join([hyps_list[idx] for idx in np.sort(temp)])
+                temp.add(i)
+                hyps = " ".join([hyps_list[idx] for idx in temp])
                 cur_rouge, cur_result_score = rouge_eval(hyps, refer)
                 if cur_rouge > cur_max_rouge:
                     cur_max_rouge = cur_rouge
@@ -127,7 +129,7 @@ def calLabel(article, abstract):
                     cur_max_hyps = hyps
                     cur_max_idx = i
         if cur_max_rouge != 0.0 and cur_max_rouge >= best_rouge:
-            selected.append(cur_max_idx)
+            selected.add(cur_max_idx)
             selected_sent_cnt += 1
             best_rouge = cur_max_rouge
             best_result_rouge_score = cur_max_result_score
@@ -175,18 +177,18 @@ def ray_best_rouge(index, test_reviews, dataset_name, subset_name):
         item_id = int(test_review_chunk[1])
         candidate_set = test_review_chunk[2]
         review_set = test_review_chunk[3]
-        # If candidate set is too large, we just ignore this
+        # If candidate set is too large, we sample a subset from the candidate set
         if do_hard_clip and len(candidate_set) > hard_clip_size:
             # cnt += 1
             # if cnt % 5 == 0:
             #     print("[Thread {0}] Finished {1} review instances".format(index, cnt))
             # continue
             candidate_set = random.sample(candidate_set, hard_clip_size)
-        # Get the corresponding sentences
+        # Get the candidate sentences
         this_candidate_sents = []
         for this_cand in candidate_set:
             this_candidate_sents.append(id_to_sent_trainset[this_cand])
-        # Get the corresponding gold review
+        # Get the gold review
         this_review_sents = []
         for this_rev in review_set:
             this_review_sents.append(id_to_sent_testset[this_rev])
