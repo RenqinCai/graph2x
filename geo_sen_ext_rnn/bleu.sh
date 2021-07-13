@@ -1,0 +1,1 @@
+perl multi-bleu.perl ref.txt < pred.txt
