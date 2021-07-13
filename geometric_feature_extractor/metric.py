@@ -12,6 +12,7 @@ from nltk.translate import bleu_score
 from rouge_score import rouge_scorer
 from sklearn import metrics
 
+
 def get_recall_precision_f1(preds, targets, topk=26):
 
     fpr, tpr, thresholds = metrics.roc_curve(targets, preds, pos_label=1)
@@ -59,6 +60,54 @@ def get_feature_recall_precision(pred, ref):
     recall = recall_num / len(ref)
     precision = precision_num / len(pred)
     return recall, precision
+
+
+def get_recall_precision_f1_gt_valid(preds_scores, targets, featureids, topk=26, total_feature_num=1000):
+    """
+    "param: preds_scores: predict scores
+    :param: targets: list of target featureids
+    :param: featureids: list
+    """
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    target_labels = np.zeros(total_feature_num)
+    for target_featureid in targets:
+        target_featureid_int = int(target_featureid)
+        target_labels[target_featureid_int] = 1
+    # Construct the 1-hot predict scores. 1-dim vector.
+    preds_scores_model = np.zeros(total_feature_num)
+    for i in range(len(featureids)):
+        preds_scores_model[int(featureids[i])] = preds_scores[i]
+    # Compute the AUC score
+    fpr, tpr, thresholds = metrics.roc_curve(target_labels, preds_scores_model, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+    # get the topk-feature of the model's predicts
+    topk_logits, topk_preds = torch.topk(preds_scores, topk, dim=0)
+    # print("topk_preds: ", topk_preds)
+    # topk_preds_featureid_index = featureids[topk_preds]
+    topk_preds_featureid_index = [featureids[idx.item()] for idx in topk_preds]
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    topk_pred_labels = np.zeros(total_feature_num)
+    for pred_featureid in topk_preds_featureid_index:
+        topk_pred_featureid_int = int(pred_featureid)
+        topk_pred_labels[topk_pred_featureid_int] = 1
+
+    T = (topk_pred_labels == target_labels)
+    P = (topk_pred_labels == 1)
+
+    TP = sum(T*P).item()
+
+    precision = TP/(sum(topk_pred_labels))
+
+    recall = TP/(sum(target_labels))
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc, topk_preds_featureid_index, topk_logits
 
 
 def get_feature_recall_precision_rouge(pred, ref):

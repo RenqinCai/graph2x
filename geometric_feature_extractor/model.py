@@ -38,7 +38,7 @@ class GraphX(nn.Module):
         self.m_item_embed = nn.Embedding(self.m_item_num, args.item_embed_size)
 
         self.m_feature_embed = nn.Embedding(self.m_feature_num, args.feature_embed_size)
-        
+
         # self.m_feature_embed = vocab_obj.m_fid2fembed
         self.m_feature_embed_size = args.feature_embed_size
         self.f_load_feature_embedding(vocab_obj.m_fid2fembed)
@@ -47,7 +47,7 @@ class GraphX(nn.Module):
         # self.m_sent_embed = vocab_obj.m_sid2sembed
         self.m_sent_embed_size = args.sent_embed_size
         self.f_load_sent_embedding(vocab_obj.m_sid2sembed)
-       
+
         self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size, bias=False)
         self.feature_state_proj = nn.Linear(args.feature_embed_size, args.hidden_size, bias=False)
         self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
@@ -141,13 +141,13 @@ class GraphX(nn.Module):
         # print("item_node_embed", item_node_embed.size())
 
         batch_fnum = graph_batch.f_num
-        batch_snum = graph_batch.s_num
+        # batch_snum = graph_batch.s_num
 
         batch_cumsum_fnum = torch.cumsum(batch_fnum, dim=0)
         last_cumsum_fnum_i = 0
 
-        batch_cumsum_snum = torch.cumsum(batch_snum, dim=0)
-        last_cumsum_snum_i = 0
+        # batch_cumsum_snum = torch.cumsum(batch_snum, dim=0)
+        # last_cumsum_snum_i = 0
 
         # batch_nnum = graph_batch.num_nodes
         # print(batch_nnum)
@@ -166,12 +166,16 @@ class GraphX(nn.Module):
             x_batch.append(item_node_embed[i].unsqueeze(0))
 
             nnum_i = graph_batch[i].num_nodes
-            debug_nnum_i = batch_fnum[i]+batch_snum[i]+2
+            # debug_nnum_i = batch_fnum[i]+batch_snum[i]+2
+            # assert nnum_i == debug_nnum_i, "error node num"
+
+            debug_nnum_i = batch_fnum[i] + 2
             assert nnum_i == debug_nnum_i, "error node num"
+
             # print("debug", debug_nnum_i, nnum_i)
-        
+
         x = torch.cat(x_batch, dim=0)
-      
+
         # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
         # print("x", x)
@@ -242,13 +246,13 @@ class GraphX(nn.Module):
         user_node_embed = self.user_state_proj(user_embed)
 
         batch_fnum = graph_batch.f_num
-        batch_snum = graph_batch.s_num
+        # batch_snum = graph_batch.s_num
 
         batch_cumsum_fnum = torch.cumsum(batch_fnum, dim=0)
         last_cumsum_fnum_i = 0
 
-        batch_cumsum_snum = torch.cumsum(batch_snum, dim=0)
-        last_cumsum_snum_i = 0
+        # batch_cumsum_snum = torch.cumsum(batch_snum, dim=0)
+        # last_cumsum_snum_i = 0
 
         x_batch = []
         for i in range(batch_size):
@@ -262,7 +266,7 @@ class GraphX(nn.Module):
 
             x_batch.append(user_node_embed[i].unsqueeze(0))
             x_batch.append(item_node_embed[i].unsqueeze(0))
-            
+
         x = torch.cat(x_batch, dim=0)
 
         # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
@@ -287,7 +291,7 @@ class GraphX(nn.Module):
         mask_f_batch = []
         target_f_label_batch = []
         max_f_num_batch = 0
-        
+
         for batch_idx in range(batch_size):
         # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]

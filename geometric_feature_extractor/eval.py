@@ -14,12 +14,10 @@ import torch.nn.functional as F
 import torch.nn as nn
 import datetime
 import statistics
-from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_recall_precision_f1, get_sentence_bleu
+from metric import get_recall_precision_f1_gt_valid
 from rouge import Rouge
 import dgl
 import pickle
-
-dataset_name = 'medium_500'
 
 
 class EVAL(object):
@@ -27,43 +25,24 @@ class EVAL(object):
         super().__init__()
 
         self.m_batch_size = args.batch_size
+        self.m_dataset_name = args.data_set
         self.m_mean_loss = 0
+        self.m_device = device
+        self.m_model_path = args.model_path
+        self.m_model_file_name = args.model_file.split('/')[-1].split('.pt')[0]
+        self.m_eval_output_path = args.eval_output_path
 
-        self.m_sid2swords = vocab_obj.m_sid2swords
-        # self.m_item2iid = vocab_obj.m_item2iid
         self.m_feature2fid = vocab_obj.m_feature2fid
         self.m_item2iid = vocab_obj.m_item2iid
         self.m_user2uid = vocab_obj.m_user2uid
 
-        # get item id to item mapping
-        self.m_iid2item = {self.m_item2iid[k]: k for k in self.m_item2iid}
-        # get fid to feature(id) mapping
-        self.m_fid2feature = {self.m_feature2fid[k]: k for k in self.m_feature2fid}
-        # get user id to user mapping
-        self.m_uid2user = {self.m_user2uid[k]: k for k in self.m_user2uid}
+        self.m_feature_topk = args.select_topk_f    # default: 15
+        print("Number of predicted features selected: {}".format(self.m_feature_topk))
 
-        self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
+        # self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
-        self.m_device = device
-        self.m_model_path = args.model_path
-
-        # need to load some mappings
-        # id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
-        # feature2id_file = '../../Dataset/ratebeer/{}/train/feature/feature2id.json'.format(dataset_name)
-        # testset_sent2id_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2id.json'.format(dataset_name)
-        # testset_sentid2feature_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2feature.json'.format(dataset_name)
-        # with open(id2feature_file, 'r') as f:
-        #     print("Load file: {}".format(id2feature_file))
-        #     self.d_id2feature = json.load(f)
-        # with open(feature2id_file, 'r') as f:
-        #     print("Load file: {}".format(feature2id_file))
-        #     self.d_feature2id = json.load(f)
-        # with open(testset_sent2id_file, 'r') as f:
-        #     print("Load file: {}".format(testset_sent2id_file))
-        #     self.d_testsetsent2id = json.load(f)
-        # with open(testset_sentid2feature_file, 'r') as f:
-        #     print("Load file: {}".format(testset_sentid2feature_file))
-        #     self.d_testsetsentid2feature = json.load(f)
+        # Load data mappings
+        self.f_load_dicts(vocab_obj, args)
 
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
@@ -139,8 +118,6 @@ class EVAL(object):
         print("train data feature node num", np.mean(f_num))
         print("train data sentence node num", np.mean(s_num))
 
-
-
     def f_cluster_embedding(self):
 
         # self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
@@ -212,271 +189,262 @@ class EVAL(object):
 
     def f_eval_new(self, train_data, eval_data):
 
-        # recall_list = []
-        # precision_list = []
-        # F1_list = []
-
-        f_recall_list = []
-        f_precision_list = []
-        f_F1_list = []
-        f_auc_list = []
-
-        rouge_1_f_list = []
-        rouge_1_p_list = []
-        rouge_1_r_list = []
-
-        rouge_2_f_list = []
-        rouge_2_p_list = []
-        rouge_2_r_list = []
-
-        rouge_l_f_list = []
-        rouge_l_p_list = []
-        rouge_l_r_list = []
-
-        bleu_list = []
-        bleu_1_list = []
-        bleu_2_list = []
-        bleu_3_list = []
-        bleu_4_list = []
-
-        rouge = Rouge()
-
-        feature_recall_list = []
-        feature_precision_list = []
-
-        feature_num_per_sentence_ref = []
-        feature_num_per_sentence_pred = []
-        feature_num_per_review_ref = []
-        feature_num_per_review_pred = []
-
+        f_recall_list, f_precision_list, f_F1_list, f_AUC_list = [], [], [], []
+        num_features_per_graph_train = []
+        num_features_per_graph_eval = []
         print('--'*10)
-
-        debug_index = 0
-        topk = 3
-        topk_candidate = 20
-
-        # already got feature2fid mapping, need the reverse
-        self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
-        # print(self.m_feture2fid)
 
         i = 0
         self.m_network.eval()
         with torch.no_grad():
-            print("Number of evaluation data: {}".format(len(eval_data)))
+            for graph_batch in train_data:
+                if i % 100 == 0:
+                    print("... eval(train data) ...", i)
+                i += 1
+                # Get batch data
+                graph_batch = graph_batch.to(self.m_device)
+                #### logits: batch_size*max_sen_num
+                f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
+                batch_size_f = f_logits.size(0)
+                batch_size = graph_batch.num_graphs
+                assert batch_size == batch_size_f
+                for j in range(batch_size):
+                    # get feature prediction performance
+                    # f_logits, fids, f_masks, target_f_labels
+                    target_f_labels_j = target_f_labels[j].cpu()
+                    # get the predicted feature ids and feature logits
+                    f_num_j = target_f_labels_j.size(0)
+                    num_features_per_graph_train.append(f_num_j)
 
+            i = 0
+            print("Number of evaluation data: {}".format(len(eval_data)))
             for graph_batch in eval_data:
-                
                 if i % 100 == 0:
                     print("... eval ... ", i)
                 i += 1
-
+                # Get batch data
                 graph_batch = graph_batch.to(self.m_device)
 
                 #### logits: batch_size*max_sen_num
-                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
+                f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
 
-                topk_logits, topk_pred_snids = torch.topk(s_logits, topk, dim=1)
-                
-                #### topk sentence index
-                #### pred_sids: batch_size*topk_sent
-                pred_sids = sids.gather(dim=1, index=topk_pred_snids)
-
-                batch_size = s_logits.size(0)
-
-                top_cdd_logits, top_cdd_pred_snids = torch.topk(s_logits, topk_candidate, dim=1)
-                top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
-
-                reverse_s_logits = (1-s_logits)*s_masks
-                bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_candidate, dim=1)
-                bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
+                batch_size_f = f_logits.size(0)
+                batch_size = graph_batch.num_graphs
+                assert batch_size == batch_size_f
 
                 userid = graph_batch.u_rawid
                 itemid = graph_batch.i_rawid
 
+                # Loop through this batch
                 for j in range(batch_size):
-                    refs_j = []
-                    hyps_j = []
-
-                    for sid_k in target_sids[j]:
-                        refs_j.append(self.m_sid2swords[sid_k.item()])
-
-                    for sid_k in pred_sids[j]:
-                        hyps_j.append(self.m_sid2swords[sid_k.item()])
-
-                    hyps_j = " ".join(hyps_j)
-                    refs_j = " ".join(refs_j)
-
-                    userid_j = userid[j]
-                    itemid_j = itemid[j]
-
-                    with open('../result/eval_logging_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(userid_j))
-                        f.write("item id: {}\n".format(itemid_j))
-                        f.write("hyps_j: {}\n".format(hyps_j))
-                        f.write("refs_j: {}\n".format(refs_j))
-                        f.write("========================================\n")
-
-                    top_cdd_hyps_j = []
-                    top_cdd_probs_j = top_cdd_logits[j]
-                    for sid_k in top_cdd_pred_sids[j]:
-                        top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-
-                    with open('../result/eval_logging_top_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(userid_j))
-                        f.write("item id: {}\n".format(userid_j))
-                        f.write("refs_j: {}\n".format(refs_j))
-                        for k in range(topk_candidate):
-                            # key is the sentence content
-                            # value is the probability of this sentence
-                            f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
-                            f.write("prob: {}\n".format(top_cdd_probs_j[k].item()))
-                            # also retrieve the feature of this sentence
-                            
-                            f.write("----:----:----:----:----:----:----:----:\n")
-                        f.write("========================================\n")
-
-                    bottom_cdd_hyps_j = []
-                    bottom_cdd_probs_j = 1-bottom_cdd_logits[j]
-                    for sid_k in bottom_cdd_pred_sids[j]:
-                        bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-
-                    with open('../result/eval_logging_bottom_{}.txt'.format(dataset_name), 'a') as f:
-                        f.write("user id: {}\n".format(userid_j))
-                        f.write("item id: {}\n".format(userid_j))
-                        f.write("refs_j: {}\n".format(refs_j))
-                        for k in range(topk_candidate):
-                            # key is the sentence content
-                            # value is the probability of this sentence
-                            f.write("candidate sentence: {}\n".format(bottom_cdd_hyps_j[k]))
-                            f.write("prob: {}\n".format(bottom_cdd_probs_j[k].item()))
-                            f.write("----:----:----:----:----:----:----:----:\n")
-                        f.write("========================================\n")
-
-                    scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
-
-                    rouge_1_f_list.append(scores_j["rouge-1"]["f"])
-                    rouge_1_r_list.append(scores_j["rouge-1"]["r"])
-                    rouge_1_p_list.append(scores_j["rouge-1"]["p"])
-
-                    rouge_2_f_list.append(scores_j["rouge-2"]["f"])
-                    rouge_2_r_list.append(scores_j["rouge-2"]["r"])
-                    rouge_2_p_list.append(scores_j["rouge-2"]["p"])
-
-                    rouge_l_f_list.append(scores_j["rouge-l"]["f"])
-                    rouge_l_r_list.append(scores_j["rouge-l"]["r"])
-                    rouge_l_p_list.append(scores_j["rouge-l"]["p"])
-
-                    # bleu_scores_j = compute_bleu([refs_j], [hyps_j])
-                    bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
-                    bleu_list.append(bleu_scores_j)
-
-                    # bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_bleu([refs_j], [hyps_j])
-                    bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
-
-                    # bleu_1_scores_j = compute_bleu_order([refs_j], [hyps_j], order=1)
-                    bleu_1_list.append(bleu_1_scores_j)
-
-                    # bleu_2_scores_j = compute_bleu_order([refs_j], [hyps_j], order=2)
-                    bleu_2_list.append(bleu_2_scores_j)
-
-                    # bleu_3_scores_j = compute_bleu_order([refs_j], [hyps_j], order=3)
-                    bleu_3_list.append(bleu_3_scores_j)
-
-                    # bleu_4_scores_j = compute_bleu_order([refs_j], [hyps_j], order=4)
-                    bleu_4_list.append(bleu_4_scores_j)
-
-                    ### get feature prediction performance
+                    # Get the user/item id of this graph
+                    userid_j = userid[j].item()
+                    itemid_j = itemid[j].item()
+                    # get the true user/item id
+                    true_userid_j = self.m_uid2user[userid_j]
+                    true_itemid_j = self.m_iid2item[itemid_j]
+                    # get feature prediction performance
                     # f_logits, fids, f_masks, target_f_labels
-                    f_logits_j = f_logits[j]
-                    fid_j = fids[j]
-                    mask_f_j = f_masks[j]
-                    target_f_labels_j = target_f_labels[j]
-
+                    f_logits_j = f_logits[j].cpu()
+                    fid_j = fids[j].cpu()
+                    mask_f_j = f_masks[j].cpu()
+                    target_f_labels_j = target_f_labels[j].cpu()
+                    # get the predicted feature ids and feature logits
                     f_num_j = target_f_labels_j.size(0)
                     mask_f_logits_j = f_logits_j[:f_num_j]
-                    
-                    f_prec_j, f_recall_j, f_f1_j, f_auc_j = get_recall_precision_f1(mask_f_logits_j, target_f_labels_j)
+                    mask_fid_j = fid_j[:f_num_j]
+                    mask_featureid_j = [self.m_fid2feature[this_f_id.item()] for this_f_id in mask_fid_j]
+                    num_features_per_graph_eval.append(f_num_j)
+                    # get the gt feature ids
+                    gt_featureid_j, _ = self.get_gt_review_featuretf_ui(true_userid_j, true_itemid_j)
+                    # compute P/R/F1/AUC of the predicted features vs. gt features. topk=15
+                    f_prec_j, f_recall_j, f_f1_j, f_auc_j, _, _ = get_recall_precision_f1_gt_valid(
+                        mask_f_logits_j, gt_featureid_j, mask_featureid_j,
+                        self.m_feature_topk, self.total_feature_num)
+                    # Add predicted (multi-task/random) features metrics
                     f_precision_list.append(f_prec_j)
                     f_recall_list.append(f_recall_j)
                     f_F1_list.append(f_f1_j)
-                    f_auc_list.append(f_auc_j)
-
-
-        self.m_mean_eval_rouge_1_f = np.mean(rouge_1_f_list)
-        self.m_mean_eval_rouge_1_r = np.mean(rouge_1_r_list)
-        self.m_mean_eval_rouge_1_p = np.mean(rouge_1_p_list)
-
-        self.m_mean_eval_rouge_2_f = np.mean(rouge_2_f_list)
-        self.m_mean_eval_rouge_2_r = np.mean(rouge_2_r_list)
-        self.m_mean_eval_rouge_2_p = np.mean(rouge_2_p_list)
-
-        self.m_mean_eval_rouge_l_f = np.mean(rouge_l_f_list)
-        self.m_mean_eval_rouge_l_r = np.mean(rouge_l_r_list)
-        self.m_mean_eval_rouge_l_p = np.mean(rouge_l_p_list)
-
-        self.m_mean_eval_bleu = np.mean(bleu_list)
-        self.m_mean_eval_bleu_1 = np.mean(bleu_1_list)
-        self.m_mean_eval_bleu_2 = np.mean(bleu_2_list)
-        self.m_mean_eval_bleu_3 = np.mean(bleu_3_list)
-        self.m_mean_eval_bleu_4 = np.mean(bleu_4_list)
+                    f_AUC_list.append(f_auc_j)
 
         self.m_mean_f_precision = np.mean(f_precision_list)
         self.m_mean_f_recall = np.mean(f_recall_list)
         self.m_mean_f_f1 = np.mean(f_F1_list)
-        self.m_mean_f_auc = np.mean(f_auc_list)
+        self.m_mean_f_auc = np.mean(f_AUC_list)
+        self.m_mean_f_node_num_train = np.mean(num_features_per_graph_train)
+        self.m_mean_f_node_num_test = np.mean(num_features_per_graph_eval)
 
-        print("feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f"%(self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc))
+        print(
+            "feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f" % (
+                self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc))
+        print("Average number of features, train-set: {0}\ttest-set: {1}".format(
+            self.m_mean_f_node_num_train, self.m_mean_f_node_num_test
+        ))
 
-        # self.m_recall_feature = np.mean(feature_recall_list)
-        # self.m_precision_feature = np.mean(feature_precision_list)
+        output_dir = os.path.join(self.m_eval_output_path, self.m_model_file_name)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
-        # self.m_mean_f_num_per_sent_pred = np.mean(feature_num_per_sentence_pred)
-        # self.m_mean_f_num_per_sent_ref = np.mean(feature_num_per_sentence_ref)
-        # self.m_mean_f_num_per_review_pred = np.mean(feature_num_per_review_pred)
-        # self.m_mean_f_num_per_review_ref = np.mean(feature_num_per_review_ref)
+        metric_log_file = os.path.join(
+            output_dir,
+            'eval_metrics_{0}_f_topk{1}.txt'.format(
+                self.m_dataset_name,
+                self.m_feature_topk)
+        )
+        print("writing evaluation result to: {}".format(metric_log_file))
+        with open(metric_log_file, 'w') as f:
+            f.write(
+                "feature prediction, precision: %.4f, recall: %.4f, F1: %.4f, AUC: %.4f\n" % (
+                    self.m_mean_f_precision, self.m_mean_f_recall, self.m_mean_f_f1, self.m_mean_f_auc)
+            )
 
-        # print("NLL_loss:%.4f"%(self.m_mean_eval_loss))
-        print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f" % (
-            self.m_mean_eval_rouge_1_f,
-            self.m_mean_eval_rouge_1_p,
-            self.m_mean_eval_rouge_1_r,
-            self.m_mean_eval_rouge_2_f,
-            self.m_mean_eval_rouge_2_p,
-            self.m_mean_eval_rouge_2_r,
-            self.m_mean_eval_rouge_l_f,
-            self.m_mean_eval_rouge_l_p,
-            self.m_mean_eval_rouge_l_r))
-        print("bleu:%.4f" % (self.m_mean_eval_bleu))
-        print("bleu-1:%.4f" % (self.m_mean_eval_bleu_1))
-        print("bleu-2:%.4f" % (self.m_mean_eval_bleu_2))
-        print("bleu-3:%.4f" % (self.m_mean_eval_bleu_3))
-        print("bleu-4:%.4f" % (self.m_mean_eval_bleu_4))
-        # print("feature recall: {}".format(self.m_recall_feature))
-        # print("feature precision: {}".format(self.m_precision_feature))
-        # print("feature num per sentence [pred]: {}".format(self.m_mean_f_num_per_sent_pred))
-        # print("feature num per sentence [ref]: {}".format(self.m_mean_f_num_per_sent_ref))
-        # print("feature num per review [pred]: {}".format(self.m_mean_f_num_per_review_pred))
-        # print("feature num per review [ref]: {}".format(self.m_mean_f_num_per_review_ref))
-        # print("total number of sentence [pred]: {}".format(len(feature_num_per_sentence_pred)))
-        # print("total number of sentence [ref]: {}".format(len(feature_num_per_sentence_ref)))
-        # print("total number of review [pred]: {}".format(len(feature_num_per_review_pred)))
-        # print("total number of review [ref]: {}".format(len(feature_num_per_review_ref)))
+    def f_load_dicts(self, vocab_obj, args):
+        """ Load some useful dicts of data
+        """
+        self.dataset_name = args.data_set
+        self.dataset_dir = args.data_dir
+        self.m_feature2fid = vocab_obj.m_feature2fid
+        self.m_item2iid = vocab_obj.m_item2iid
+        self.m_user2uid = vocab_obj.m_user2uid
 
-        with open('../result/eval_metrics_{}.txt'.format(dataset_name), 'w') as f:
-            print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n"%(
-                self.m_mean_eval_rouge_1_f,
-                self.m_mean_eval_rouge_1_p,
-                self.m_mean_eval_rouge_1_r,
-                self.m_mean_eval_rouge_2_f,
-                self.m_mean_eval_rouge_2_p,
-                self.m_mean_eval_rouge_2_r,
-                self.m_mean_eval_rouge_l_f,
-                self.m_mean_eval_rouge_l_p,
-                self.m_mean_eval_rouge_l_r), file=f)
-            print("bleu:%.4f\n" % (self.m_mean_eval_bleu), file=f)
-            print("bleu-1:%.4f\n" % (self.m_mean_eval_bleu_1), file=f)
-            print("bleu-2:%.4f\n" % (self.m_mean_eval_bleu_2), file=f)
-            print("bleu-3:%.4f\n" % (self.m_mean_eval_bleu_3), file=f)
-            print("bleu-4:%.4f\n" % (self.m_mean_eval_bleu_4), file=f)
-            # print("feature recall: {}\n".format(self.m_recall_feature), file=f)
-            # print("feature precision: {}\n".format(self.m_precision_feature), file=f)
+        self.m_train_sent_num = vocab_obj.m_train_sent_num
+        # get item id to item mapping
+        self.m_iid2item = {self.m_item2iid[k]: k for k in self.m_item2iid}
+        # get user id to user mapping
+        self.m_uid2user = {self.m_user2uid[k]: k for k in self.m_user2uid}
+        # get fid to feature(id) mapping
+        self.m_fid2feature = {self.m_feature2fid[k]: k for k in self.m_feature2fid}
+
+        # need to load some mappings
+        id2feature_file = os.path.join(self.dataset_dir, 'train/feature/id2feature.json')
+        feature2id_file = os.path.join(self.dataset_dir, 'train/feature/feature2id.json')
+        # trainset_id2sent_file = os.path.join(self.dataset_dir, 'train/sentence/id2sentence.json')
+        # validset_id2sent_file = os.path.join(self.dataset_dir, 'valid/sentence/id2sentence.json')
+        testset_useritem_cdd_withproxy_file = os.path.join(self.dataset_dir, 'test/useritem2sentids_withproxy.json')
+        # trainset_user2featuretf_file = os.path.join(self.dataset_dir, 'train/user/user2featuretf.json')
+        # trainset_item2featuretf_file = os.path.join(self.dataset_dir, 'train/item/item2featuretf.json')
+        # trainset_sentid2featuretfidf_file = os.path.join(self.dataset_dir, 'train/sentence/sentence2feature.json')
+        testset_sentid2featuretf_file = os.path.join(self.dataset_dir, 'test/sentence/sentence2featuretf.json')
+        # trainset_user2sentid_file = os.path.join(self.dataset_dir, 'train/user/user2sentids.json')
+        # trainset_item2sentid_file = os.path.join(self.dataset_dir, 'train/item/item2sentids.json')
+
+        # Load dicts
+        # Load features
+        with open(id2feature_file, 'r') as f:
+            print("Load file: {}".format(id2feature_file))
+            self.d_id2feature = json.load(f)
+        with open(feature2id_file, 'r') as f:
+            print("Load file: {}".format(feature2id_file))
+            self.d_feature2id = json.load(f)
+
+        # # Load train/valid sentence_id to sentence content
+        # with open(trainset_id2sent_file, 'r') as f:
+        #     print("Load file: {}".format(trainset_id2sent_file))
+        #     self.d_trainset_id2sent = json.load(f)
+        # with open(validset_id2sent_file, 'r') as f:
+        #     print("Load file: {}".format(validset_id2sent_file))
+        #     self.d_validset_id2sent = json.load(f)
+
+        # Load validset user-item cdd sents with proxy
+        with open(testset_useritem_cdd_withproxy_file, 'r') as f:
+            print("Load file: {}".format(testset_useritem_cdd_withproxy_file))
+            self.d_testset_useritem_cdd_withproxy = json.load(f)
+
+        # # Load trainset user to feature tf-value dict
+        # with open(trainset_user2featuretf_file, 'r') as f:
+        #     print("Load file: {}".format(trainset_user2featuretf_file))
+        #     self.d_trainset_user2featuretf = json.load(f)
+        # # Load trainset item to feature tf-value dict
+        # with open(trainset_item2featuretf_file, 'r') as f:
+        #     print("Load file: {}".format(trainset_item2featuretf_file))
+        #     self.d_trainset_item2featuretf = json.load(f)
+
+        # Load validset sentence id to feature tf-value dict
+        with open(testset_sentid2featuretf_file, 'r') as f:
+            print("Load file: {}".format(testset_sentid2featuretf_file))
+            self.d_testset_sentid2featuretf = json.load(f)
+        # # Load trainset sentence id to feature tf-idf value dict
+        # with open(trainset_sentid2featuretfidf_file, 'r') as f:
+        #     print("Load file: {}".format(trainset_sentid2featuretfidf_file))
+        #     self.d_trainset_sentid2featuretfidf = json.load(f)
+
+        # # Load trainset user to sentid dict
+        # with open(trainset_user2sentid_file, 'r') as f:
+        #     print("Load file: {}".format(trainset_user2sentid_file))
+        #     self.d_trainset_user2sentid = json.load(f)
+        # # Load trainset item to sentid dict
+        # with open(trainset_item2sentid_file, 'r') as f:
+        #     print("Load file: {}".format(trainset_item2sentid_file))
+        #     self.d_trainset_item2sentid = json.load(f)
+
+        print("Total number of feature: {}".format(len(self.d_id2feature)))
+        self.total_feature_num = len(self.d_id2feature)
+
+        # # Get the sid2featuretf dict (on Valid Set)
+        # self.d_testset_sid2featuretf = self.get_sid2featuretf_eval(
+        #     self.d_validset_sentid2featuretf, self.m_sent2sid, self.m_train_sent_num)
+        # # Get the sid2feature dict (on Train Set)
+        # self.d_trainset_sid2feature = self.get_sid2feature_train(
+        #     self.d_trainset_sentid2featuretfidf, self.m_sent2sid)
+
+    def get_sid2featuretf_eval(self, testset_sentid2featuretf, sent2sid, train_sent_num):
+        """ Get sid to featuretf mapping (on valid/test set).
+            During constructing the graph data, we load the valid/test sentences. Since the
+            original sentid is seperated from train-set sentence sentid, we first add the
+            sentid of valid/test-set with train_sent_num and then mapping the new sent_id
+            to sid. Therefore, to simplify the mapping between sid and featureid (and also
+            feature tf) we need to construct this mapping here.
+        """
+        testset_sid2featuretf = dict()
+        for key, value in testset_sentid2featuretf.items():
+            assert isinstance(key, str)
+            sentid = int(key) + train_sent_num
+            sentid = str(sentid)
+            sid = sent2sid[sentid]
+            assert sid not in testset_sid2featuretf
+            testset_sid2featuretf[sid] = value
+        return testset_sid2featuretf
+
+    def get_sid2feature_train(self, trainset_sentid2featuretfidf, sent2sid):
+        trainset_sid2feature = dict()
+        for key, value in trainset_sentid2featuretfidf.items():
+            assert isinstance(key, str)     # key is the sentid
+            sid = sent2sid[key]
+            assert sid not in trainset_sid2feature
+            trainset_sid2feature[sid] = list(value.keys())
+        return trainset_sid2feature
+
+    def get_gt_review_featuretf(self, testset_sid2featuretf, gt_sids):
+        """ Get the featureid list and featuretf dict for a list of ground-truth sids
+        """
+        gt_featureid_set = set()
+        gt_featuretf_dict = dict()
+        for gt_sid in gt_sids:
+            cur_sid_featuretf = testset_sid2featuretf[gt_sid.item()]
+            for key, value in cur_sid_featuretf.items():
+                gt_featureid_set.add(key)
+                if key not in gt_featuretf_dict:
+                    gt_featuretf_dict[key] = value
+                else:
+                    gt_featuretf_dict[key] += value
+        return list(gt_featureid_set), gt_featuretf_dict
+
+    def get_gt_review_featuretf_ui(self, true_userid, true_itemid):
+        """ Get the featureid list and featuretf dict based on a query of userid and itemid
+        """
+        # Get the gt sentence ids
+        gt_sentids = []
+        for sentid in self.d_testset_useritem_cdd_withproxy[true_userid][true_itemid][-2]:
+            gt_sentids.append(sentid)
+        # Get the feature tf of the sentence ids
+        gt_featureid_set = set()
+        gt_featuretf_dict = dict()
+        for gt_sentid in gt_sentids:
+            cur_sentid_featuretf = self.d_testset_sentid2featuretf[gt_sentid]
+            for featureid, tf_value in cur_sentid_featuretf.items():
+                gt_featureid_set.add(featureid)
+                if featureid not in gt_featuretf_dict:
+                    gt_featuretf_dict[featureid] = tf_value
+                else:
+                    gt_featuretf_dict[featureid] += tf_value
+        return list(gt_featureid_set), gt_featuretf_dict

@@ -92,13 +92,9 @@ def main(args):
 
         eval_obj = EVAL(vocab_obj, args, device)
 
-        eval_obj.f_get_statistics(train_data, valid_data)
-
-        # network = network.to(device)
-
-        # eval_obj.f_init_eval(network, args.model_file, reload_model=True)
-
-        # eval_obj.f_eval(train_data, valid_data)
+        network = network.to(device)
+        eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+        eval_obj.f_eval(train_data, valid_data)
 
 
 if __name__ == "__main__":
@@ -110,11 +106,13 @@ if __name__ == "__main__":
     parser.add_argument('--data_name', type=str, default='ratebeer')
     parser.add_argument('--data_file', type=str, default='data.pickle')
     parser.add_argument('--graph_dir', type=str, default='../output_graph/')
+    parser.add_argument('--data_set', type=str, default='medium_500_pure')
 
     parser.add_argument('--vocab_file', type=str, default='vocab.json')
     parser.add_argument('--model_file', type=str, default="model_best.pt")
     parser.add_argument('--model_name', type=str, default="graph_sentence_extractor")
     parser.add_argument('--model_path', type=str, default="../checkpoint/")
+    parser.add_argument('--eval_output_path', type=str, default="../result/")
 
     ### model
     parser.add_argument('--user_embed_size', type=int, default=256)
@@ -149,6 +147,8 @@ if __name__ == "__main__":
     # parser.add_argument('--init_mult', type=float, default=1.0)
     # parser.add_argument('--variance', type=float, default=0.995)
     # parser.add_argument('--max_seq_length', type=int, default=100)
+    parser.add_argument('--select_topk_s', type=int, default=3)
+    parser.add_argument('--select_topk_f', type=int, default=15)
 
     ### others
     parser.add_argument('--train', action='store_true', default=False)
