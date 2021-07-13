@@ -22,7 +22,7 @@ import random
 
 dataset_name = 'medium_500_pure'
 label_format = 'soft_label'
-use_blocking = False        # whether using 3-gram blocking or not
+use_blocking = True        # whether using 3-gram blocking or not
 use_filtering = False       # whether using bleu score based filtering or not
 save_predict = False
 random_sampling = False
@@ -292,6 +292,8 @@ class EVAL(object):
         bleu_4_list = []
 
         rouge = Rouge()
+        num_empty_hyps = 0
+        num_too_long_hyps = 0
 
         num_sents_per_target_review = []        # number of sentences for each ui-pair's gt review
         # num_features_per_target_review = []     # number of features for each ui-pair's gt review
@@ -587,9 +589,19 @@ class EVAL(object):
                         # Save refs and selected hyps into file
                         refs_file = os.path.join(self.m_eval_output_path, 'reference.txt')
                         hyps_file = os.path.join(self.m_eval_output_path, 'hypothesis.txt')
+                        refs_json_file = os.path.join(self.m_eval_output_path, 'refs.json')
+                        hyps_json_file = os.path.join(self.m_eval_output_path, 'hyps.json')
+                        # write reference raw text
                         with open(refs_file, 'a') as f_ref:
                             f_ref.write(refs_j)
                             f_ref.write("\n")
+                        # write reference raw text with user/item id
+                        with open(refs_json_file, 'a') as f_ref_json:
+                            cur_ref_json = {
+                                'user': true_userid_j, 'item': true_itemid_j, 'text': refs_j
+                            }
+                            json.dump(cur_ref_json, f_ref_json)
+                            f_ref_json.write("\n")
                         if use_majority_vote_popularity:
                             cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
                             hyps_pop, _, _ = self.majority_vote_popularity(
@@ -597,6 +609,12 @@ class EVAL(object):
                             with open(hyps_file, 'a') as f_hyp:
                                 f_hyp.write(hyps_pop)
                                 f_hyp.write("\n")
+                            with open(hyps_json_file, 'a') as f_hyp_json:
+                                cur_hyp_json = {
+                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_pop
+                                }
+                                json.dump(cur_hyp_json, f_hyp_json)
+                                f_hyp_json.write("\n")
                         elif use_majority_vote_feature_score:
                             cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
                             hyps_f_score, _, _, _ = self.majority_vote_predicted_feature(
@@ -604,10 +622,22 @@ class EVAL(object):
                             with open(hyps_file, 'a') as f_hyp:
                                 f_hyp.write(hyps_f_score)
                                 f_hyp.write("\n")
+                            with open(hyps_json_file, 'a') as f_hyp_json:
+                                cur_hyp_json = {
+                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_f_score
+                                }
+                                json.dump(cur_hyp_json, f_hyp_json)
+                                f_hyp_json.write("\n")
                         else:
                             with open(hyps_file, 'a') as f_hyp:
                                 f_hyp.write(hyps_j)
                                 f_hyp.write("\n")
+                            with open(hyps_json_file, 'a') as f_hyp_json:
+                                cur_hyp_json = {
+                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_j
+                                }
+                                json.dump(cur_hyp_json, f_hyp_json)
+                                f_hyp_json.write("\n")
 
                     if use_majority_vote_popularity and not save_hyps_refs:
                         cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
@@ -633,7 +663,18 @@ class EVAL(object):
                             f_popu.write("========================================\n")
 
                     if compute_rouge_score:
-                        scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+                        try:
+                            scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+                        except:
+                            if hyps_j == '':
+                                hyps_j = '<unk>'
+                                scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+                                num_empty_hyps += 1
+                            else:
+                                # hyps may be too long, then we truncate it to be half
+                                hyps_j_trunc = " ".join(hyps_j_list[0:int(s_topk/2)])
+                                scores_j = rouge.get_scores(hyps_j_trunc, refs_j, avg=True)
+                                num_too_long_hyps += 1
 
                         rouge_1_f_list.append(scores_j["rouge-1"]["f"])
                         rouge_1_r_list.append(scores_j["rouge-1"]["r"])
@@ -688,12 +729,13 @@ class EVAL(object):
         print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
             len(eval_data), cnt_useritem_pair, save_logging_cnt
         ))
-        print("Totally {0} train ui-pairs and the corresponding feature hidden embeddings are saved.".format(
-            train_ui_pair_saved_cnt
-        ))
-        print("Totally {0} test ui-pairs and the corresponding feature hidden embeddings are saved.".format(
-            test_ui_pair_saved_cnt
-        ))
+        # print("Totally {0} train ui-pairs and the corresponding feature hidden embeddings are saved.".format(
+        #     train_ui_pair_saved_cnt
+        # ))
+        # print("Totally {0} test ui-pairs and the corresponding feature hidden embeddings are saved.".format(
+        #     test_ui_pair_saved_cnt
+        # ))
+        print("Number of too long hypothesis: {}".format(num_too_long_hyps))
 
         if compute_rouge_score and compute_bleu_score:
             print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f" % (

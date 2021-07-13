@@ -29,7 +29,7 @@ label_format = 'soft_label'
 
 # how to select the top-predicted sentences
 use_origin = False
-use_trigram = True
+use_trigram = False
 use_bleu_filter = False
 
 # select features randomly
@@ -38,16 +38,16 @@ random_features = False
 # select features based on the popularity
 popular_features = False
 popular_features_vs_origin = False
-popular_features_vs_trigram = True
+popular_features_vs_trigram = False
 
 # select features based on the feature prediction scores
-predict_features = False
+predict_features = True
 predict_features_vs_origin = False
-predict_features_vs_trigram = True
+predict_features_vs_trigram = False
 
 save_sentence_selected = False
-save_feature_selected = True
-save_feature_logits = True
+save_feature_selected = False
+save_feature_logits = False
 
 # True if the predicted features is compared with the ground-turth features.
 # False if the predicted features is compared with the proxy's features.
@@ -63,8 +63,15 @@ class EVAL_FEATURE(object):
     def __init__(self, vocab_obj, args, device):
         super().__init__()
 
-        self.m_batch_size = args.batch_size
+        self.m_device = device
         self.m_mean_loss = 0
+        self.m_batch_size = args.batch_size
+        self.m_dataset_name = args.data_set
+        self.m_model_path = args.model_path
+        self.m_model_file = args.model_file
+        self.m_eval_output_path = args.eval_output_path
+        self.m_model_file_name = args.model_file.split('/')[-1].split('.pt')[0]
+        self.m_feature_topk = args.select_topk_f    # default: 15
 
         self.m_sid2swords = vocab_obj.m_sid2swords
         self.m_feature2fid = vocab_obj.m_feature2fid
@@ -83,11 +90,6 @@ class EVAL_FEATURE(object):
         self.m_sid2sentid = {self.m_sent2sid[k]: k for k in self.m_sent2sid}
 
         self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
-
-        self.m_device = device
-        self.m_model_path = args.model_path
-        self.m_model_file = args.model_file
-        self.m_eval_output_path = args.eval_output_path
 
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
         print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
@@ -218,7 +220,7 @@ class EVAL_FEATURE(object):
         s_topk = 3                # this is used for predict topk sentences
         s_topk_candidate = 20     # this is used for sanity check for the top/bottom topk sentneces
         # already got feature2fid mapping, need the reverse
-        self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
+        # self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
 
         cnt_useritem_batch = 0
         save_logging_cnt = 0
@@ -321,7 +323,7 @@ class EVAL_FEATURE(object):
                     if use_ground_truth:
                         if popular_features:
                             useritem_popular_features, ui_popular_features_freq = self.get_popular_features(
-                                useritem_to_featuretf, topk=avg_gt_feature_num)
+                                useritem_to_featuretf, topk=self.m_feature_topk)
                         elif popular_features_vs_origin:
                             useritem_popular_features, ui_popular_features_freq = self.get_popular_features(
                                 useritem_to_featuretf, topk=hyps_num_unique_features)
@@ -362,7 +364,8 @@ class EVAL_FEATURE(object):
                     target_featureword_j = [self.d_id2feature[this_fea_id] for this_fea_id in target_featureid_j]
 
                     # gt is generated from the ground-truth review. These features are unique features (duplications removed)
-                    gt_featureid_j, _ = self.get_gt_review_featuretf(self.d_testset_sid2featuretf, target_sids[j])
+                    # gt_featureid_j, _ = self.get_gt_review_featuretf(self.d_testset_sid2featuretf, target_sids[j])
+                    gt_featureid_j, _ = self.get_gt_review_featuretf_ui(true_userid_j, true_itemid_j)
                     # get the feature word of the gt feature labels
                     gt_featureword_j = [self.d_id2feature[this_fea_id] for this_fea_id in gt_featureid_j]
 
@@ -396,7 +399,7 @@ class EVAL_FEATURE(object):
                             # P/R/F1/AUC of the random features vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1_gt_random(
                                 mask_f_logits_j, gt_featureid_j, mask_featureid_j,
-                                avg_gt_feature_num, total_feature_num)
+                                self.m_feature_topk, total_feature_num)
                         elif predict_features_vs_origin or predict_features_vs_trigram:
                             # P/R/F1/AUC of the predicted features (dynamic topk) vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j, topk_preds_features_logits = get_recall_precision_f1_gt(
@@ -406,7 +409,7 @@ class EVAL_FEATURE(object):
                             # P/R/F1/AUC of the predicted features vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j, topk_preds_features_logits = get_recall_precision_f1_gt(
                                 mask_f_logits_j, gt_featureid_j, mask_featureid_j,
-                                avg_gt_feature_num, total_feature_num)
+                                self.m_feature_topk, total_feature_num)
                     else:
                         if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
                             f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = get_recall_precision_f1_popular(
@@ -507,8 +510,21 @@ class EVAL_FEATURE(object):
             self.m_mean_f_prec_hyps, self.m_mean_f_recall_hyps, self.m_mean_f_f1_hyps
         ))
 
-        metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(
-            dataset_name, label_format))
+        output_dir = os.path.join(self.m_eval_output_path, self.m_model_file_name)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        if predict_features:
+            metric_log_file = os.path.join(
+                output_dir,
+                'eval_metrics_{0}_{1}_f_topk{2}.txt'.format(
+                    self.m_dataset_name, label_format, self.m_feature_topk))
+        else:
+            metric_log_file = os.path.join(
+                output_dir,
+                'eval_metrics_{0}_{1}.txt'.format(
+                    self.m_dataset_name, label_format))
+        print("writing evaluation results to: {}".format(metric_log_file))
         with open(metric_log_file, 'w') as f:
             print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
                 len(eval_data), len(f_precision_list), save_logging_cnt
@@ -616,6 +632,26 @@ class EVAL_FEATURE(object):
                     gt_featuretf_dict[key] = value
                 else:
                     gt_featuretf_dict[key] += value
+        return list(gt_featureid_set), gt_featuretf_dict
+
+    def get_gt_review_featuretf_ui(self, true_userid, true_itemid):
+        """ Get the featureid list and featuretf dict based on a query of userid and itemid
+        """
+        # Get the gt sentence ids
+        gt_sentids = []
+        for sentid in self.d_testset_useritem_cdd_withproxy[true_userid][true_itemid][-2]:
+            gt_sentids.append(sentid)
+        # Get the feature tf of the sentence ids
+        gt_featureid_set = set()
+        gt_featuretf_dict = dict()
+        for gt_sentid in gt_sentids:
+            cur_sentid_featuretf = self.d_testset_sentid2featuretf[gt_sentid]
+            for featureid, tf_value in cur_sentid_featuretf.items():
+                gt_featureid_set.add(featureid)
+                if featureid not in gt_featuretf_dict:
+                    gt_featuretf_dict[featureid] = tf_value
+                else:
+                    gt_featuretf_dict[featureid] += tf_value
         return list(gt_featureid_set), gt_featuretf_dict
 
     def get_sid_user_item_source(self, pred_sids, user_id, item_id):

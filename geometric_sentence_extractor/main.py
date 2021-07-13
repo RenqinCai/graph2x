@@ -120,6 +120,7 @@ if __name__ == "__main__":
     parser.add_argument('--data_name', type=str, default='ratebeer')
     parser.add_argument('--data_file', type=str, default='data.pickle')
     parser.add_argument('--graph_dir', type=str, default='../output_graph/')
+    parser.add_argument('--data_set', type=str, default='medium_500_pure')
 
     parser.add_argument('--vocab_file', type=str, default='vocab.json')
     parser.add_argument('--model_file', type=str, default="model_best.pt")
@@ -161,6 +162,7 @@ if __name__ == "__main__":
     # parser.add_argument('--variance', type=float, default=0.995)
     # parser.add_argument('--max_seq_length', type=int, default=100)
     parser.add_argument('--select_topk_s', type=int, default=3)
+    parser.add_argument('--select_topk_f', type=int, default=15)
 
     ### others
     parser.add_argument('--train', action='store_true', default=False)
