@@ -16,9 +16,11 @@ class Encoder(nn.Module):
         self.rnn_layers = rnn_layers
         self.user_embedding = nn.Embedding(user_num, self.enc_hid_dim)
         self.item_embedding = nn.Embedding(item_num, self.enc_hid_dim)
-        # self.rating_embedding = nn.Embedding(rating_range + 1, self.enc_hid_dim)
-        # self.hidden_layer = nn.Linear(self.enc_hid_dim * 3, self.dec_hid_dim * self.rnn_layers)
-        self.hidden_layer = nn.Linear(self.enc_hid_dim * 2, self.dec_hid_dim * self.rnn_layers)
+        # with rating
+        self.rating_embedding = nn.Embedding(rating_range + 1, self.enc_hid_dim)
+        self.hidden_layer = nn.Linear(self.enc_hid_dim * 3, self.dec_hid_dim * self.rnn_layers)
+        # without rating
+        # self.hidden_layer = nn.Linear(self.enc_hid_dim * 2, self.dec_hid_dim * self.rnn_layers)
 
     def forward(self, user, item, rating):
         # user/item/rating shape: (batch_size)
@@ -26,10 +28,10 @@ class Encoder(nn.Module):
         user_embed = self.user_embedding(user)
         item_embed = self.item_embedding(item)
         # de-activate rating embeddind layer
-        # rating_embed = self.rating_embedding(rating)
+        rating_embed = self.rating_embedding(rating)
         # concat embed shape: (batch_size, enc_hid_dim * 3)
-        # concat_embed = torch.cat((user_embed, item_embed, rating_embed), dim=-1)
-        concat_embed = torch.cat((user_embed, item_embed), dim=-1)
+        concat_embed = torch.cat((user_embed, item_embed, rating_embed), dim=-1)
+        # concat_embed = torch.cat((user_embed, item_embed), dim=-1)
         # hidden_state shape: (batch_size, dec_hid_dim, rnn_layers)
         hidden_state = torch.tanh(self.hidden_layer(concat_embed)).view(-1, self.dec_hid_dim, self.rnn_layers)
 
@@ -40,8 +42,8 @@ class Encoder(nn.Module):
         # hidden_state = torch.zeros(1, user.shape[0], config.hidden_dim).to(device)
         # ****** verify review generation with GRU ****** ------ END ####
 
-        # return hidden_state, user_embed, item_embed, rating_embed
-        return hidden_state, user_embed, item_embed
+        return hidden_state, user_embed, item_embed, rating_embed
+        # return hidden_state, user_embed, item_embed
 
 
 class Decoder(nn.Module):
@@ -131,8 +133,8 @@ class Att2Seq(nn.Module):
         # outputs = torch.zeros(text_length, batch_size, text_vocab_size).to(self.device)
 
         # de-activate rating
-        # hidden, user_embed, item_embed, rating_embed = self.encoder(user, item, rating)
-        hidden, user_embed, item_embed = self.encoder(user, item, rating)
+        hidden, user_embed, item_embed, rating_embed = self.encoder(user, item, rating)
+        # hidden, user_embed, item_embed = self.encoder(user, item, rating)
 
         # construct initial hidden state
         # (encoder output) hidden: (batch_size, dec_hid_dim, rnn_layers)
@@ -175,8 +177,8 @@ class Att2Seq(nn.Module):
         outputs = torch.zeros(text_length, batch_size, text_vocab_size).to(self.device)
 
         # de-activate rating
-        # hidden, user_embed, item_embed, rating_embed = self.encoder(user, item, rating)
-        hidden, user_embed, item_embed = self.encoder(user, item, rating)
+        hidden, user_embed, item_embed, rating_embed = self.encoder(user, item, rating)
+        # hidden, user_embed, item_embed = self.encoder(user, item, rating)
 
         # construct initial hidden state
         # (encoder output) hidden: (batch_size, dec_hid_dim, rnn_layers)

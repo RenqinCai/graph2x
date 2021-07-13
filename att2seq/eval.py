@@ -24,7 +24,7 @@ dataset_name = 'medium_500_pure'
 save_hyps_refs = True
 compute_rouge_score = True
 compute_bleu_score = True
-MAX_batch_output = 1000
+MAX_batch_output = 10000
 
 
 class EVAL(object):
@@ -138,9 +138,6 @@ class EVAL(object):
 
         rouge = Rouge()
 
-        train_ui_pair_saved_cnt = 0
-        test_ui_pair_saved_cnt = 0
-
         print('--'*10)
 
         cnt_useritem_pair = 0
@@ -160,8 +157,8 @@ class EVAL(object):
                 user_batch = test_batch.user
                 item_batch = test_batch.item
                 # de-activate rating for yelp dataset
-                # rating_batch = test_batch.rating
-                rating_batch = None
+                rating_batch = test_batch.rating
+                # rating_batch = None
                 text_batch = test_batch.text
                 batch_size = user_batch.shape[0]
 
@@ -177,6 +174,14 @@ class EVAL(object):
                 gt_sentences, pred_sentences = self.convert_tensor_to_text(text_batch, output[1:])
                 assert len(gt_sentences) == batch_size
                 assert len(pred_sentences) == batch_size
+
+                # get true user id
+                true_user_ids = []
+                for user_id in user_batch:
+                    true_user_ids.append(self.m_vocab.m_uservocab.itos[user_id.item()])
+                true_item_ids = []
+                for item_id in item_batch:
+                    true_item_ids.append(self.m_vocab.m_itemvocab.itos[item_id.item()])
 
                 # Decide the batch_save_flag. To get shorted results, we only print the first several batches' results
                 cnt_useritem_batch += 1
@@ -204,12 +209,30 @@ class EVAL(object):
                         # Save refs and selected hyps into file
                         refs_file = os.path.join(self.m_eval_output_path, 'reference.txt')
                         hyps_file = os.path.join(self.m_eval_output_path, 'hypothesis.txt')
+                        refs_json_file = os.path.join(self.m_eval_output_path, 'refs.json')
+                        hyps_json_file = os.path.join(self.m_eval_output_path, 'hyps.json')
+                        # write reference raw text
                         with open(refs_file, 'a') as f_ref:
                             f_ref.write(refs_j)
                             f_ref.write("\n")
+                        # write reference raw text with user/item id
+                        with open(refs_json_file, 'a') as f_ref_json:
+                            cur_ref_json = {
+                                'user': true_user_ids[j], 'item': true_item_ids[j], 'text': refs_j
+                            }
+                            json.dump(cur_ref_json, f_ref_json)
+                            f_ref_json.write("\n")
+                        # write hypothesis raw text
                         with open(hyps_file, 'a') as f_hyp:
                             f_hyp.write(hyps_j)
                             f_hyp.write("\n")
+                        # write hypothesis raw text with user/item id
+                        with open(hyps_json_file, 'a') as f_hyp_json:
+                            cur_hyp_json = {
+                                'user': true_user_ids[j], 'item': true_item_ids[j], 'text': hyps_j
+                            }
+                            json.dump(cur_hyp_json, f_hyp_json)
+                            f_hyp_json.write("\n")
 
                     if compute_rouge_score:
                         scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
