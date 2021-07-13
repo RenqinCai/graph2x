@@ -278,11 +278,9 @@ class RATEBEER(Dataset):
 
     def create_graph(self, uid, iid, sid_list, label_sid_list):
         
-        
         ### add feature nodes
         fid2nid, nid2fid = self.add_feature_node(uid, iid, sid_list)
         feature_node_num = len(fid2nid)
-
 
         ### add sent nodes
         sent_node_num = len(sid_list)
@@ -297,17 +295,17 @@ class RATEBEER(Dataset):
 
         feat_sent_node_num = feature_node_num+sent_node_num
 
-        ### add user, item nodes
-        ### add user node
+        # ### add user, item nodes
+        # ### add user node
 
-        user_node_num = 1
-        uid2nid = {uid:feat_sent_node_num}
-        nid2uid = {feat_sent_node_num:uid}
+        # user_node_num = 1
+        # uid2nid = {uid:feat_sent_node_num}
+        # nid2uid = {feat_sent_node_num:uid}
         
-        ### add item noe
-        item_node_num = 1
-        iid2nid = {iid:feat_sent_node_num+user_node_num}
-        nid2iid = {feat_sent_node_num+user_node_num:iid}
+        # ### add item noe
+        # item_node_num = 1
+        # iid2nid = {iid:feat_sent_node_num+user_node_num}
+        # nid2iid = {feat_sent_node_num+user_node_num:iid}
         
         src_nid_list = []
         des_nid_list = []
@@ -327,38 +325,38 @@ class RATEBEER(Dataset):
                 src_nid_list.append(nid_s)
                 des_nid_list.append(nid_f)
 
-        for i in range(user_node_num):
-            nid_u = list(nid2uid.keys())[0]
-            fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
+        # for i in range(user_node_num):
+        #     nid_u = list(nid2uid.keys())[0]
+        #     fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
 
-            for fid in fid2tfidf_dict_user:
-                if fid not in fid2nid:
-                    continue
-                nid_f = fid2nid[fid]
-                tfidf_user = fid2tfidf_dict_user[fid]
+        #     for fid in fid2tfidf_dict_user:
+        #         if fid not in fid2nid:
+        #             continue
+        #         nid_f = fid2nid[fid]
+        #         tfidf_user = fid2tfidf_dict_user[fid]
 
-                src_nid_list.append(nid_f)
-                des_nid_list.append(nid_u)
+        #         src_nid_list.append(nid_f)
+        #         des_nid_list.append(nid_u)
 
-                src_nid_list.append(nid_u)
-                des_nid_list.append(nid_f)
+        #         src_nid_list.append(nid_u)
+        #         des_nid_list.append(nid_f)
 
 
-        for i in range(item_node_num):
-            nid_i = list(nid2iid.keys())[0]
-            fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
+        # for i in range(item_node_num):
+        #     nid_i = list(nid2iid.keys())[0]
+        #     fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
 
-            for fid in fid2tfidf_dict_item:
-                if fid not in fid2nid:
-                    continue
-                nid_f = fid2nid[fid]
-                tfidf_item = fid2tfidf_dict_item[fid]
+        #     for fid in fid2tfidf_dict_item:
+        #         if fid not in fid2nid:
+        #             continue
+        #         nid_f = fid2nid[fid]
+        #         tfidf_item = fid2tfidf_dict_item[fid]
 
-                src_nid_list.append(nid_f)
-                des_nid_list.append(nid_i)
+        #         src_nid_list.append(nid_f)
+        #         des_nid_list.append(nid_i)
 
-                src_nid_list.append(nid_i)
-                des_nid_list.append(nid_f)
+        #         src_nid_list.append(nid_i)
+        #         des_nid_list.append(nid_f)
             
         sent_label_array = np.zeros(sent_node_num)
         if not self.m_eval_flag:
@@ -377,8 +375,9 @@ class RATEBEER(Dataset):
 
         feat_label_tensor = torch.LongTensor(feat_label_array).unsqueeze(1)
 
-        g = Data()   
-        g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
+        g = Data() 
+        g.num_nodes = feat_sent_node_num  
+        # g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
 
         g["f_nid"] = torch.LongTensor(list(nid2fid.keys()))
         g["f_rawid"] = torch.LongTensor(list(fid2nid.keys()))
@@ -388,11 +387,11 @@ class RATEBEER(Dataset):
         g["s_rawid"] = torch.LongTensor(list(sid2nid.keys()))
         g["s_num"] = torch.LongTensor([len(sid2nid)])
 
-        g["u_nid"] = torch.LongTensor([feat_sent_node_num])
-        g["u_rawid"] = torch.LongTensor([uid])
+        # g["u_nid"] = torch.LongTensor([feat_sent_node_num])
+        # g["u_rawid"] = torch.LongTensor([uid])
 
-        g["i_nid"] = torch.LongTensor([feat_sent_node_num+user_node_num])
-        g["i_rawid"] = torch.LongTensor([iid])
+        # g["i_nid"] = torch.LongTensor([feat_sent_node_num+user_node_num])
+        # g["i_rawid"] = torch.LongTensor([iid])
 
         g.edge_index = torch.LongTensor([src_nid_list, des_nid_list])
 
@@ -785,16 +784,16 @@ class RATEBEER_TRAIN(RATEBEER):
         ### add user, item nodes
         ### add user node
 
-        user_node_num = 1
+        # user_node_num = 1
     
-        uid2nid = {uid:feat_sent_node_num}
-        nid2uid = {feat_sent_node_num:uid}
+        # uid2nid = {uid:feat_sent_node_num}
+        # nid2uid = {feat_sent_node_num:uid}
     
-        ### add item noe
-        item_node_num = 1
+        # ### add item noe
+        # item_node_num = 1
     
-        iid2nid = {iid:feat_sent_node_num+user_node_num}
-        nid2iid = {feat_sent_node_num+user_node_num:iid}
+        # iid2nid = {iid:feat_sent_node_num+user_node_num}
+        # nid2iid = {feat_sent_node_num+user_node_num:iid}
         
         src_nid_list = []
         des_nid_list = []
@@ -814,37 +813,37 @@ class RATEBEER_TRAIN(RATEBEER):
                 src_nid_list.append(nid_s)
                 des_nid_list.append(nid_f)
 
-        for i in range(user_node_num):
-            nid_u = list(nid2uid.keys())[0]
-            fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
+        # for i in range(user_node_num):
+        #     nid_u = list(nid2uid.keys())[0]
+        #     fid2tfidf_dict_user = self.m_uid2fid2tfidf_dict[uid]
 
-            for fid in fid2tfidf_dict_user:
-                if fid not in fid2nid:
-                    continue
-                nid_f = fid2nid[fid]
-                tfidf_user = fid2tfidf_dict_user[fid]
+        #     for fid in fid2tfidf_dict_user:
+        #         if fid not in fid2nid:
+        #             continue
+        #         nid_f = fid2nid[fid]
+        #         tfidf_user = fid2tfidf_dict_user[fid]
 
-                src_nid_list.append(nid_f)
-                des_nid_list.append(nid_u)
+        #         src_nid_list.append(nid_f)
+        #         des_nid_list.append(nid_u)
 
-                src_nid_list.append(nid_u)
-                des_nid_list.append(nid_f)
+        #         src_nid_list.append(nid_u)
+        #         des_nid_list.append(nid_f)
 
-        for i in range(item_node_num):
-            nid_i = list(nid2iid.keys())[0]
-            fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
+        # for i in range(item_node_num):
+        #     nid_i = list(nid2iid.keys())[0]
+        #     fid2tfidf_dict_item = self.m_iid2fid2tfidf_dict[iid]
 
-            for fid in fid2tfidf_dict_item:
-                if fid not in fid2nid:
-                    continue
-                nid_f = fid2nid[fid]
-                tfidf_item = fid2tfidf_dict_item[fid]
+        #     for fid in fid2tfidf_dict_item:
+        #         if fid not in fid2nid:
+        #             continue
+        #         nid_f = fid2nid[fid]
+        #         tfidf_item = fid2tfidf_dict_item[fid]
 
-                src_nid_list.append(nid_f)
-                des_nid_list.append(nid_i)
+        #         src_nid_list.append(nid_f)
+        #         des_nid_list.append(nid_i)
 
-                src_nid_list.append(nid_i)
-                des_nid_list.append(nid_f)
+        #         src_nid_list.append(nid_i)
+        #         des_nid_list.append(nid_f)
 
         sent_label_array = np.zeros(sent_node_num)
         soft_sent_label_num = 4
@@ -869,7 +868,8 @@ class RATEBEER_TRAIN(RATEBEER):
         feat_label_tensor = torch.LongTensor(feat_label_array).unsqueeze(1)
 
         g = Data()   
-        g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
+        g.num_nodes = feat_sent_node_num
+        # g.num_nodes = feat_sent_node_num+user_node_num+item_node_num
 
         g["f_nid"] = torch.LongTensor(list(nid2fid.keys()))
         g["f_rawid"] = torch.LongTensor(list(fid2nid.keys()))
@@ -879,11 +879,11 @@ class RATEBEER_TRAIN(RATEBEER):
         g["s_rawid"] = torch.LongTensor(list(sid2nid.keys()))
         g["s_num"] = torch.LongTensor([len(nid2sid)])
 
-        g["u_nid"] = torch.LongTensor([feat_sent_node_num])
-        g["u_rawid"] = torch.LongTensor([uid])
+        # g["u_nid"] = torch.LongTensor([feat_sent_node_num])
+        # g["u_rawid"] = torch.LongTensor([uid])
 
-        g["i_nid"] = torch.LongTensor([feat_sent_node_num+user_node_num])
-        g["i_rawid"] = torch.LongTensor([iid])
+        # g["i_nid"] = torch.LongTensor([feat_sent_node_num+user_node_num])
+        # g["i_rawid"] = torch.LongTensor([iid])
 
         g.edge_index = torch.LongTensor([src_nid_list, des_nid_list])
 
@@ -932,6 +932,7 @@ class RATEBEER_TRAIN(RATEBEER):
             gt_label_sid_list_i = self.m_gt_label_sid_list_list[i]
 
             g_i = self.create_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
+            # exit()
             # g_i = self.create_soft_graph(uid_i, iid_i, cdd_sid_list_i, gt_label_sid_list_i)
             g_i["gt_label"] = torch.tensor(gt_label_sid_list_i[-1])
             
@@ -1113,8 +1114,7 @@ class RATEBEER_VALID(RATEBEER):
             g_i["gt_label"] = torch.tensor(gt_label_sid_list_i)
             
             torch.save(g_i, g_file_i)  
-
-    
+            
 class RATEBEER_TEST(RATEBEER):
     def __init__(self):
         super().__init__()
