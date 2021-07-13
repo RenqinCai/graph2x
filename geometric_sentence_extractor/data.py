@@ -55,7 +55,7 @@ class DATA():
 
         batch_size = args.batch_size
 
-        train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=4)
+        train_loader = DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True, num_workers=0)
 
         valid_loader = DataLoader(dataset=valid_data, batch_size=batch_size, shuffle=False, num_workers=4)
 

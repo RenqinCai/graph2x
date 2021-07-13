@@ -14,12 +14,14 @@ from sklearn import metrics
 
 def get_recall_precision_f1(preds, targets, topk=26):
 
-    fpr, tpr, thresholds = metrics.roc_curve(targets, preds, pos_label=2)
+    fpr, tpr, thresholds = metrics.roc_curve(targets, preds, pos_label=1)
     auc = metrics.auc(fpr, tpr)
 
     _, topk_preds = torch.topk(preds, topk, dim=0)
 
     topk_preds = F.one_hot(topk_preds, num_classes=targets.size(0))
+    topk_preds = torch.sum(topk_preds, dim=1)
+
     T = (topk_preds == targets)
     P = (topk_preds == 1)
 

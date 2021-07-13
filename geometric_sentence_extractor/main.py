@@ -92,11 +92,13 @@ def main(args):
 
         eval_obj = EVAL(vocab_obj, args, device)
 
-        network = network.to(device)
+        eval_obj.f_get_statistics(train_data, valid_data)
 
-        eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+        # network = network.to(device)
 
-        eval_obj.f_eval(train_data, valid_data)
+        # eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+
+        # eval_obj.f_eval(train_data, valid_data)
 
 
 if __name__ == "__main__":

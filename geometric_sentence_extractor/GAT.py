@@ -14,10 +14,15 @@ class GATNET(torch.nn.Module):
         self.gat_layer_2 = GATConv(head_num*out_dim, out_dim, heads=1, concat=False, dropout=dropout_rate)
     
     def forward(self, x, edge_index):
-        x = F.dropout(x, p=0.6, training=self.training)
-        x = F.elu(self.gat_layer_1(x, edge_index))
-        x = F.dropout(x, p=0.6, training=self.training)
-        x = self.gat_layer_2(x, edge_index)
+        x_0 = F.dropout(x, p=0.6, training=self.training)
+        # x = F.elu(self.gat_layer_1(x, edge_index))
+        
+        ### e_1: edge attention weights (edge_index, attention_weights) 
+        x_1, e_1 = self.gat_layer_1(x_0, edge_index, return_attention_weights=True)
+        x_1 = F.elu(x_1)
 
-        return x
+        x_1 = F.dropout(x_1, p=0.6, training=self.training)
+        x_2, e_2 = self.gat_layer_2(x_1, edge_index, return_attention_weights=True)
+
+        return x_2
 
