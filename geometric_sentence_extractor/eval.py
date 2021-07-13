@@ -198,6 +198,65 @@ class EVAL(object):
         # self.f_cluster_embedding()
         self.f_eval_new(train_data, eval_data)
 
+    def f_get_statistics(self, train_data, eval_data):
+        f_num = []
+        s_num = []
+        g_num = 0
+        node_num = []
+
+        # for graph_batch in eval_data:
+        #     batch_size = graph_batch.num_graphs
+        #     g_num += batch_size
+        #     for j in range(batch_size):
+        #         g = graph_batch[j]
+        #         f_num.append(g.f_num)
+        #         s_num.append(g.s_num)
+        #         node_num.append(g.num_nodes)
+
+        # print("test data graph num", g_num)
+        # print("test data graph node num", np.mean(node_num))
+        # print("test data feature node num", np.mean(f_num))
+        # print("test data sentence node num", np.mean(s_num))
+
+        f_num = []
+        s_num = []
+        node_num = 0
+        g_num = 0
+
+        index = 0
+
+        for graph_batch in train_data:
+            if index % 1e2 == 0:
+                print(index)
+            index += 1
+            batch_size = graph_batch.num_graphs
+            # print("batch_size", batch_size)
+            g_num += batch_size
+            batch_fnum = graph_batch.f_num
+            f_num.extend(list(batch_fnum.cpu().numpy()))
+
+            batch_snum = graph_batch.s_num
+            s_num.extend(list(batch_snum.cpu().numpy()))
+
+            batch_node_num = graph_batch.num_nodes
+            node_num += batch_node_num
+            # print("batch_node_num", batch_node_num)
+            # node_num.extend(list(batch_node_num.cpu().numpy()))
+
+            # for j in range(batch_size):
+                # g = graph_batch[j]
+                # f_num.append(g.f_num)
+                # s_num.append(g.s_num)
+                # node_num.append(g.num_nodes)
+
+        print("train data graph num", g_num)
+        print("train data graph node num", node_num/g_num)
+        # print("train data graph node num", np.mean(node_num))
+        print("train data feature node num", np.mean(f_num))
+        print("train data sentence node num", np.mean(s_num))
+
+
+
     def f_cluster_embedding(self):
 
         # self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
