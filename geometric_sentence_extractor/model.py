@@ -58,7 +58,7 @@ class GraphX(nn.Module):
         # self.output_hidden_size = args.output_hidden_size
         # self.wh = nn.Linear(self.output_hidden_size * 2, 2)
         # self.wh = nn.Linear(args.hidden_size, 2)
-        self.sent_output = nn.Linear(args.hidden_size, 1)
+        self.sent_output = nn.Linear(args.hidden_size*3, 1)
 
         self.feat_output = nn.Linear(args.hidden_size, 1)
 
@@ -194,9 +194,18 @@ class GraphX(nn.Module):
             g = graph_batch[batch_idx]
             hidden_g_i = hidden_batch[batch_idx]
 
+            u_nid = g.u_nid
+            hidden_u_g_i = hidden_g_i[u_nid]
+
+            i_nid = g.i_nid
+            hidden_i_g_i = hidden_g_i[i_nid]
+
             s_nid = g.s_nid
             hidden_s_g_i = hidden_g_i[s_nid]
-            hidden_s.append(hidden_s_g_i)
+            # hidden_s.append(hidden_s_g_i)
+
+            hidden_s_ui_g_i = torch.cat([hidden_s_g_i, hidden_u_g_i.unsqueeze(0).expand(hidden_s_g_i.size(0), -1), hidden_i_g_i.unsqueeze(0).expand(hidden_s_g_i.size(0), -1)], dim=-1)
+            hidden_s.append(hidden_s_ui_g_i)
 
             f_nid = g.f_nid
             hidden_f_g_i = hidden_g_i[f_nid]
@@ -271,6 +280,9 @@ class GraphX(nn.Module):
         #### hidden: node_num*hidden_size
         hidden = self.m_gat(graph_batch.x, graph_batch.edge_index)
 
+        ### add elu after graph attention network
+        hidden = F.elu(hidden)
+
         #### hidden_batch: batch_size*max_node_size_per_g*hidden_size
         hidden_batch, mask_batch = to_dense_batch(hidden, graph_batch.batch)
 
@@ -308,6 +320,12 @@ class GraphX(nn.Module):
             g = graph_batch[batch_idx]
             hidden_g_i = hidden_batch[batch_idx]
 
+            u_nid = g.u_nid
+            hidden_u_g_i = hidden_g_i[u_nid]
+
+            i_nid = g.i_nid
+            hidden_i_g_i = hidden_g_i[i_nid]
+
             s_nid = g.s_nid
             s_num = s_nid.size(0)
             pad_s_num = max_s_num_batch-s_num
@@ -316,7 +334,11 @@ class GraphX(nn.Module):
             hidden_s_g_i = hidden_g_i[s_nid]
             pad_s_g_i = torch.zeros(pad_s_num, hidden_s_g_i.size(1)).to(self.m_device)
             hidden_pad_s_g_i = torch.cat([hidden_s_g_i, pad_s_g_i], dim=0)
-            hidden_s_batch.append(hidden_pad_s_g_i.unsqueeze(0))
+
+            hidden_pad_s_ui_g_i = torch.cat([hidden_pad_s_g_i, hidden_u_g_i.unsqueeze(0).expand(hidden_pad_s_g_i.size(0), -1), hidden_i_g_i.unsqueeze(0).expand(hidden_pad_s_g_i.size(0), -1)], dim=-1)
+            hidden_s_batch.append(hidden_pad_s_ui_g_i.unsqueeze(0))
+
+            # hidden_s_batch.append(hidden_pad_s_g_i.unsqueeze(0))
 
             #### pad id can be further improved
             sid = g.s_rawid
@@ -356,7 +378,6 @@ class GraphX(nn.Module):
 
             target_f_label_i = g.f_label
             target_f_label_batch.append(target_f_label_i)
-
 
         #### hidden_s_batch: batch_size*max_s_num_batch*hidden_size
         hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
