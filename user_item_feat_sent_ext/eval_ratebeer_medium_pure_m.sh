@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python main.py --data_dir "/u/pw7nc/experiments/Dataset/ratebeer/medium_500_pure/" --epoch_num 1 --eval --verbose --batch_size 256 --batch_size_eval 512 --learning_rate 0.0001 --optimizer "Adam" --model_file "ratebeer_uifeatsentext/model_best_7_28_23_32.pt" --eval_output_path "../result/ablation_study/user_item_feat_sent_ext/medium_500_pure/lr0.0001/"

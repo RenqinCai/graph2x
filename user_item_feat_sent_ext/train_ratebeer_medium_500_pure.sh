@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=1 python main.py --data_dir "/u/pw7nc/experiments/Dataset/ratebeer/medium_500_pure" --data_name "ratebeer" --epoch_num 2 --train --verbose --batch_size 256 --batch_size_eval 256 --learning_rate 0.0005 --optimizer "Adam" --grad_clip --print_interval 5000 --feat_finetune
