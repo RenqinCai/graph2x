@@ -463,7 +463,7 @@ class TRAINER(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 #### logits: batch_size*max_sen_num
-                s_logits, sids, masks, target_sids, _, _, _, _ = network.eval_forward(graph_batch)
+                s_logits, sids, masks, target_sids, _, _, _, _, _ = network.eval_forward(graph_batch)
 
                 # loss = self.m_rec_loss(glist)
                 # loss_list.append(loss.item())

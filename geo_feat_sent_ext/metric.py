@@ -12,28 +12,252 @@ from nltk.translate import bleu_score
 from rouge_score import rouge_scorer
 from sklearn import metrics
 
-def get_recall_precision_f1(preds, targets, topk=26):
 
-    fpr, tpr, thresholds = metrics.roc_curve(targets, preds, pos_label=1)
+def get_recall_precision_f1(preds, targets, topk=26):
+    fpr, tpr, thresholds = metrics.roc_curve(targets.squeeze(), preds, pos_label=1)
     auc = metrics.auc(fpr, tpr)
 
     _, topk_preds = torch.topk(preds, topk, dim=0)
 
     topk_preds = F.one_hot(topk_preds, num_classes=targets.size(0))
-    topk_preds = torch.sum(topk_preds, dim=1)
+
+    topk_preds = torch.sum(topk_preds, dim=0)
+    targets = targets.squeeze()
 
     T = (topk_preds == targets)
     P = (topk_preds == 1)
 
-    TP = sum(T*P)
+    TP = sum(T*P).item()
 
     precision = TP/topk
 
-    recall = TP/sum(targets)
+    recall = TP/(sum(targets).item())
 
-    f1 = 2*precision*recall/(precision+recall)
-    
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc, topk_preds
+
+
+def get_recall_precision_f1_sent(select_featureids, target_featureids, total_feature_num=1000):
+    """ Compute the feature P/R/F1 of the features in the selected/predicted sentences
+    :param: select_featureids: list of featureids of the selected predict sentences (after origin topk/3-gram/bleu)
+    :param: target_featureids: list of target featureids. Target can be proxy or ground-truth.
+    :param: total_feature_num: total number of features in this dataset.
+    """
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0.
+    target_labels = np.zeros(total_feature_num)
+    for target_featureid in target_featureids:
+        target_featureid_int = int(target_featureid)
+        target_labels[target_featureid_int] = 1.0
+    # Construct the 1-hot select scores. 1-dim vector. The index of featureid being select will be 1, otherwise 0.
+    select_scores = np.zeros(total_feature_num)
+    for select_featureid in select_featureids:
+        select_featureid_int = int(select_featureid)
+        select_scores[select_featureid_int] = 1.0
+    # Compute AUC. It's meaning-less here to compute AUC score since we don't have the predict scores
+    fpr, tpr, thresholds = metrics.roc_curve(target_labels, select_scores, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+
+    T = (select_scores == target_labels)
+    P = (select_scores == 1.0)
+
+    TP = sum(T*P).item()
+
+    precision = TP/(sum(select_scores))
+
+    recall = TP/(sum(target_labels))
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
     return precision, recall, f1, auc
+
+
+def get_recall_precision_f1_random(preds, targets, topk=26):
+    random_preds = torch.randn_like(preds)
+
+    fpr, tpr, thresholds = metrics.roc_curve(targets.squeeze(), random_preds, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+
+    _, topk_preds = torch.topk(random_preds, topk, dim=0)
+
+    topk_preds = F.one_hot(topk_preds, num_classes=targets.size(0))
+
+    topk_preds = torch.sum(topk_preds, dim=0)       # 1-dim tensor. position of value 1 is the predicted
+    targets = targets.squeeze()
+
+    T = (topk_preds == targets)
+    P = (topk_preds == 1)
+
+    TP = sum(T*P).item()
+
+    precision = TP/topk
+
+    recall = TP/(sum(targets).item())
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc, topk_preds
+
+
+def get_recall_precision_f1_popular(preds, targets, feature_tf, total_feature_num=1000):
+    """
+    "param: pred: list of predict featureids
+    :param: targets: list of target featureids
+    :param: feature_tf: dict, key is featureid and value is feature-tf
+    """
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    target_labels = np.zeros(total_feature_num)
+    for target_featureid in targets:
+        target_featureid_int = int(target_featureid)
+        target_labels[target_featureid_int] = 1
+    # Construct the 1-hot predict scores. 1-dim vector. The index of featureid in predict will be 1, otherwise 0
+    pred_scores = np.zeros(total_feature_num)
+    for pred_featureid in preds:
+        pred_featureid_int = int(pred_featureid)
+        pred_scores[pred_featureid_int] = 1.0
+    # Construct the predict scores. 1-dim vector.
+    pred_scores_tf = np.zeros(total_feature_num)
+    for cdd_featureid in feature_tf.keys():
+        cdd_featureid_int = int(cdd_featureid)
+        pred_scores_tf[cdd_featureid_int] = feature_tf[cdd_featureid]
+    # Compute the AUC score
+    # fpr, tpr, thresholds = metrics.roc_curve(target_labels, pred_scores, pos_label=1)
+    fpr, tpr, thresholds = metrics.roc_curve(target_labels, pred_scores_tf, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+
+    T = (pred_scores == target_labels)
+    P = (pred_scores == 1)
+
+    TP = sum(T*P).item()
+
+    precision = TP/(sum(pred_scores))
+
+    recall = TP/(sum(target_labels))
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc
+
+
+def get_recall_precision_f1_gt(preds_scores, targets, featureids, topk=26, total_feature_num=1000):
+    """
+    "param: preds_scores: predict scores
+    :param: targets: list of target featureids
+    :param: feature_tf: dict, key is featureid and value is feature-tf
+    """
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    target_labels = np.zeros(total_feature_num)
+    for target_featureid in targets:
+        target_featureid_int = int(target_featureid)
+        target_labels[target_featureid_int] = 1
+    # Construct the 1-hot predict scores. 1-dim vector. The index of featureid in predict will be 1, otherwise 0
+    preds_scores_model = np.zeros(total_feature_num)
+    for i in range(len(featureids)):
+        preds_scores_model[int(featureids[i])] = preds_scores[i]
+    # Compute the AUC score
+    # fpr, tpr, thresholds = metrics.roc_curve(target_labels, pred_scores, pos_label=1)
+    fpr, tpr, thresholds = metrics.roc_curve(target_labels, preds_scores_model, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+    # get the topk-feature of the model's predicts
+    topk_logits, topk_preds = torch.topk(preds_scores, topk, dim=0)
+    # print("topk_preds: ", topk_preds)
+    # topk_preds_featureid_index = featureids[topk_preds]
+    topk_preds_featureid_index = [featureids[idx.item()] for idx in topk_preds]
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    topk_pred_labels = np.zeros(total_feature_num)
+    for pred_featureid in topk_preds_featureid_index:
+        topk_pred_featureid_int = int(pred_featureid)
+        topk_pred_labels[topk_pred_featureid_int] = 1
+
+    T = (topk_pred_labels == target_labels)
+    P = (topk_pred_labels == 1)
+
+    TP = sum(T*P).item()
+
+    precision = TP/(sum(topk_pred_labels))
+
+    recall = TP/(sum(target_labels))
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc, topk_preds_featureid_index, topk_logits
+
+
+def get_recall_precision_f1_gt_random(preds_scores, targets, featureids, topk=26, total_feature_num=1000):
+    """
+    "param: preds_scores: predict scores
+    :param: targets: list of target featureids
+    :param: feature_tf: dict, key is featureid and value is feature-tf
+    """
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    target_labels = np.zeros(total_feature_num)
+    for target_featureid in targets:
+        target_featureid_int = int(target_featureid)
+        target_labels[target_featureid_int] = 1
+
+    # Construct the random predict scores. 1-dim vector.
+    random_preds_scores = torch.randn_like(preds_scores)
+    preds_scores_model = np.zeros(total_feature_num)
+    for i in range(len(featureids)):
+        preds_scores_model[int(featureids[i])] = random_preds_scores[i]
+
+    # Compute the AUC score
+    fpr, tpr, thresholds = metrics.roc_curve(target_labels, preds_scores_model, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+
+    # get the topk-feature of the model's predicts
+    _, topk_preds = torch.topk(random_preds_scores, topk, dim=0)
+    # print("topk_preds: ", topk_preds)
+    # topk_preds_featureid_index = featureids[topk_preds]
+    topk_preds_featureid_index = [featureids[idx.item()] for idx in topk_preds]
+    # Construct the target label. 1-dim vector. The index of featureid in target will be 1, otherwise 0
+    topk_pred_labels = np.zeros(total_feature_num)
+    for pred_featureid in topk_preds_featureid_index:
+        topk_pred_featureid_int = int(pred_featureid)
+        topk_pred_labels[topk_pred_featureid_int] = 1
+
+    T = (topk_pred_labels == target_labels)
+    P = (topk_pred_labels == 1)
+
+    TP = sum(T*P).item()
+
+    precision = TP/(sum(topk_pred_labels))
+
+    recall = TP/(sum(target_labels))
+
+    # f1 = 2*precision*recall/(precision+recall)
+
+    if precision+recall != 0:
+        f1 = 2*precision*recall/(precision+recall)
+    else:
+        f1 = 0.0
+
+    return precision, recall, f1, auc, topk_preds_featureid_index
 
 
 def get_feature_recall_precision(pred, ref):

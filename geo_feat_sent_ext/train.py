@@ -15,7 +15,6 @@ import torch.nn.functional as F
 from rouge import Rouge
 
 
-
 class TRAINER(object):
 
     def __init__(self, vocab_obj, args, device):
@@ -34,9 +33,8 @@ class TRAINER(object):
         self.m_mean_val_loss = 0
         self.m_mean_eval_precision = 0
         self.m_mean_eval_recall = 0
-
         self.m_mean_eval_bleu = 0
-        
+
         self.m_epochs = args.epoch_num
         self.m_batch_size = args.batch_size
 
@@ -54,8 +52,10 @@ class TRAINER(object):
         self.m_grad_clip = args.grad_clip
         self.m_weight_decay = args.weight_decay
         # self.m_l2_reg = args.l2_reg
+        self.m_feature_loss_lambda = args.feature_lambda
 
         self.m_soft_train = args.soft_label
+        self.m_multi_task = args.multi_task
 
         self.m_train_iteration = 0
         self.m_valid_iteration = 0
@@ -84,16 +84,16 @@ class TRAINER(object):
         best_eval_recall = 0
         best_eval_bleu = 0
         # self.f_init_word_embed(pretrain_word_embed, network)
-        try: 
+        try:
             for epoch in range(self.m_epochs):
-                
+
                 print("++"*10, epoch, "++"*10)
 
                 s_time = datetime.datetime.now()
                 self.f_eval_epoch(valid_data, network, optimizer, logger_obj)
                 e_time = datetime.datetime.now()
                 print("validation epoch duration", e_time-s_time)
-                    
+
                 if last_eval_loss == 0:
                     last_eval_loss = self.m_mean_eval_loss
 
@@ -142,7 +142,7 @@ class TRAINER(object):
         except KeyboardInterrupt:
             print("--"*20)
             print("... exiting from training early")
-           
+
             if best_eval_bleu < self.m_mean_eval_bleu:
                 print("... final save ...")
                 checkpoint = {'model':network.state_dict()}
@@ -173,13 +173,13 @@ class TRAINER(object):
         start_time = time.time()
 
         network.train()
-        feat_loss_weight = 1.0
+        feat_loss_weight = self.m_feature_loss_lambda   # default: 1.0
 
         for g_batch in train_data:
             # print("graph_batch", g_batch)
             # if i % self.m_print_interval == 0:
             #     print("... eval ... ", i)
-            
+
             graph_batch = g_batch.to(self.m_device)
             logits_s, logits_f = network(graph_batch)
 
@@ -187,22 +187,24 @@ class TRAINER(object):
             loss = None
             loss_s = None
             if not self.m_soft_train:
-                labels = (labels == 3)
+                # If not using soft label, only the gt sentences are labeled as 1
+                labels_s = (labels_s == 3)
                 loss_s = self.m_rec_loss(logits_s, labels_s.float())
             else:
                 loss_s = self.m_rec_soft_loss(graph_batch, logits_s, labels_s)
 
+            # 1. Loss from feature prediction
             labels_f = graph_batch.f_label
             loss_f = self.m_rec_loss(logits_f, labels_f.float())
-
+            # 2. multi-task loss, sum of sentence loss and feature loss
             loss = loss_s + feat_loss_weight*loss_f
-
+            # add current sentence prediction loss
             loss_s_list.append(loss_s.item())
             tmp_loss_s_list.append(loss_s.item())
-
+            # add current feature prediction loss
             loss_f_list.append(loss_f.item())
             tmp_loss_f_list.append(loss_f.item())
-
+            # add current loss
             loss_list.append(loss.item())
             tmp_loss_list.append(loss.item())
 
@@ -216,10 +218,9 @@ class TRAINER(object):
             optimizer.step()
 
             self.m_train_iteration += 1
-            
+
             iteration += 1
             if iteration % self.m_print_interval == 0:
-            # if iteration % 5 == 0:
                 logger_obj.f_add_output2IO("%d, loss:%.4f, sent loss:%.4f, weighted feat loss:%.4f, feat loss:%.4f"%(iteration, np.mean(tmp_loss_list), np.mean(tmp_loss_s_list), feat_loss_weight*np.mean(tmp_loss_f_list), np.mean(tmp_loss_f_list)))
 
                 tmp_loss_list = []
@@ -234,7 +235,7 @@ class TRAINER(object):
         end_time = time.time()
         print("+++ duration +++", end_time-start_time)
         self.m_mean_train_loss = np.mean(loss_list)
-    
+
     def f_eval_train_epoch(self, eval_data, network, optimizer, logger_obj):
         loss_list = []
         recall_list = []
@@ -408,28 +409,12 @@ class TRAINER(object):
 
     def f_eval_epoch(self, eval_data, network, optimizer, logger_obj):
         loss_list = []
-        recall_list = []
-        precision_list = []
-        F1_list = []
+        # recall_list, precision_list, F1_list = [], [], []
 
-        rouge_1_f_list = []
-        rouge_1_p_list = []
-        rouge_1_r_list = []
-
-        rouge_2_f_list = []
-        rouge_2_p_list = []
-        rouge_2_r_list = []
-
-        rouge_l_f_list = []
-        rouge_l_p_list = []
-        rouge_l_r_list = []
-
-        bleu_list = []
-
-        bleu_1_list = []
-        bleu_2_list = []
-        bleu_3_list = []
-        bleu_4_list = []
+        rouge_1_r_list, rouge_1_p_list, rouge_1_f_list = [], [], []
+        rouge_2_f_list, rouge_2_p_list, rouge_2_r_list = [], [], []
+        rouge_l_f_list, rouge_l_p_list, rouge_l_r_list = [], [], []
+        bleu_list, bleu_1_list, bleu_2_list, bleu_3_list, bleu_4_list = [], [], [], [], []
 
         self.m_eval_iteration = self.m_train_iteration
 
@@ -460,7 +445,7 @@ class TRAINER(object):
 
                 #### logits: batch_size*max_sen_num
                 s_logits, sids, masks, target_sids, _, _, _, _ = network.eval_forward(graph_batch)
-               
+
                 # loss = self.m_rec_loss(glist)
                 # loss_list.append(loss.item())
 
@@ -517,7 +502,7 @@ class TRAINER(object):
 
             # logger_obj.f_add_scalar2tensorboard("eval/loss", np.mean(loss_list), self.m_eval_iteration)
             # logger_obj.f_add_scalar2tensorboard("eval/recall", np.mean(recall_list), self.m_eval_iteration)
-                
+
         # self.m_mean_eval_loss = np.mean(loss_list)
         # self.m_mean_eval_recall = np.mean(recall_list)
         # self.m_mean_eval_precision = np.mean(precision_list)
@@ -550,4 +535,3 @@ class TRAINER(object):
         logger_obj.f_add_output2IO("bleu-4:%.4f"%(self.m_mean_eval_bleu_4))
 
         network.train()
-

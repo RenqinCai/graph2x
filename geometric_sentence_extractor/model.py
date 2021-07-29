@@ -214,7 +214,7 @@ class GraphX(nn.Module):
 
         return logits_s, logits_f
 
-    def eval_forward(self, graph_batch):
+    def eval_forward(self, graph_batch, get_embedding=False):
         ## init node embeddings
 
         ##### feature node
@@ -261,7 +261,7 @@ class GraphX(nn.Module):
 
             x_batch.append(user_node_embed[i].unsqueeze(0))
             x_batch.append(item_node_embed[i].unsqueeze(0))
-            
+
         x = torch.cat(x_batch, dim=0)
 
         # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
@@ -286,7 +286,7 @@ class GraphX(nn.Module):
         mask_f_batch = []
         target_f_label_batch = []
         max_f_num_batch = 0
-        
+
         for batch_idx in range(batch_size):
         # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]
@@ -360,7 +360,7 @@ class GraphX(nn.Module):
 
         #### hidden_s_batch: batch_size*max_s_num_batch*hidden_size
         hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
-        
+
         ### sid_batch: batch_size*max_s_num_batch
         sid_batch = torch.cat(sid_batch, dim=0)
 
@@ -381,4 +381,14 @@ class GraphX(nn.Module):
         f_logits = f_logits.squeeze(-1)
         f_logits = torch.sigmoid(f_logits)*mask_f_batch
 
-        return s_logits, sid_batch, mask_s_batch, target_sid_batch, f_logits, fid_batch, mask_f_batch, target_f_label_batch, hidden_f_batch
+        if not get_embedding:
+            return (s_logits, sid_batch, mask_s_batch, target_sid_batch,
+                    f_logits, fid_batch, mask_f_batch, target_f_label_batch, hidden_f_batch)
+        else:
+            # print(graph_batch.x.shape)
+            graph_batch_x, mask_graph_batch_x = to_dense_batch(graph_batch.x, graph_batch.batch)
+            # print(graph_batch_x.shape)
+            # print(mask_graph_batch_x.shape)
+            return (s_logits, sid_batch, mask_s_batch, target_sid_batch,
+                    f_logits, fid_batch, mask_f_batch, target_f_label_batch,
+                    hidden_f_batch, graph_batch_x, mask_graph_batch_x)

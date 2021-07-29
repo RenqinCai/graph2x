@@ -125,6 +125,9 @@ class TRAINER(object):
                 # whether should we save this model based on the bleu score
                 if best_eval_bleu < self.m_mean_eval_bleu:
                     print("Epoch {} ... saving model ...".format(epoch))
+                    logger_obj.f_add_output2IO(
+                        "Epoch {} ... saving model ...".format(epoch)
+                    )
                     checkpoint = {'model': network.state_dict()}
                     self.f_save_model(checkpoint)
                     best_eval_bleu = self.m_mean_eval_bleu
@@ -137,6 +140,9 @@ class TRAINER(object):
             # whether should we save this model based on the bleu score
             if best_eval_bleu < self.m_mean_eval_bleu:
                 print("Epoch {} ... saving model ...".format(epoch))
+                logger_obj.f_add_output2IO(
+                    "Epoch {} ... saving model ...".format(epoch)
+                )
                 checkpoint = {'model': network.state_dict()}
                 self.f_save_model(checkpoint)
                 best_eval_bleu = self.m_mean_eval_bleu
@@ -182,8 +188,8 @@ class TRAINER(object):
             user_batch = train_batch.user
             item_batch = train_batch.item
             # de-activate rating
-            # rating_batch = train_batch.rating
-            rating_batch = None
+            # rating_batch = None
+            rating_batch = train_batch.rating
             text_batch = train_batch.text
             output = network(user_batch, item_batch, rating_batch, text_batch)
             output_dim = output.shape[-1]
@@ -251,8 +257,8 @@ class TRAINER(object):
                 user_batch = eval_batch.user
                 item_batch = eval_batch.item
                 # de-activate rating
-                # rating_batch = eval_batch.rating
-                rating_batch = None
+                # rating_batch = None
+                rating_batch = eval_batch.rating
                 text_batch = eval_batch.text
                 batch_size = user_batch.shape[0]
 

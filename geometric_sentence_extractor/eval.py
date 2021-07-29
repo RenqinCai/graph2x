@@ -22,18 +22,22 @@ import random
 
 dataset_name = 'medium_500_pure'
 label_format = 'soft_label'
-use_blocking = True        # whether using 3-gram blocking or not
+# methods to select predicted sentence
+use_blocking = False        # whether using 3-gram blocking or not
 use_filtering = False       # whether using bleu score based filtering or not
-save_predict = False
+use_trigram_feat_unigram_blocking = True
 random_sampling = False
-random_features = False
+bleu_filter_value = 0.25
+
+save_predict = False
 get_statistics = False
 save_sentence_selected = False
 save_feature_selected = False
-bleu_filter_value = 0.25
+random_features = False
 
 # Baselines
 use_majority_vote_popularity = False
+use_majority_vote_popularity_itemside = False
 use_majority_vote_feature_score = False
 
 save_hyps_refs = True
@@ -82,9 +86,11 @@ class EVAL(object):
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
         print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
         if use_blocking:
-            print("Using tri-gram blocking.")
+            print("Using trigram blocking.")
         elif use_filtering:
             print("Using bleu-based filtering.")
+        elif use_trigram_feat_unigram_blocking:
+            print("Using trigram blocking + feature unigram blocking.")
         elif random_sampling:
             print("Random sampling.")
         else:
@@ -93,6 +99,8 @@ class EVAL(object):
             print("hypothesis selected based on feature popularity.")
         elif use_majority_vote_feature_score:
             print("hypothesis selected based on feature predicted scores.")
+        elif use_majority_vote_popularity_itemside:
+            print("hypothesis selected based on ITEM side feature popularity.")
         else:
             print("hypothesis selected based on original score and filtering methods.")
 
@@ -111,6 +119,9 @@ class EVAL(object):
         trainset_user2sentid_file = '../../Dataset/ratebeer/{}/train/user/user2sentids.json'.format(dataset_name)
         trainset_item2sentid_file = '../../Dataset/ratebeer/{}/train/item/item2sentids.json'.format(dataset_name)
         trainset_sentid2featuretfidf_file = '../../Dataset/ratebeer/{}/train/sentence/sentence2feature.json'.format(dataset_name)
+        # Load the combined train/test set
+        trainset_combined_file = '../../Dataset/ratebeer/{}/train_combined.json'.format(dataset_name)
+        testset_combined_file = '../../Dataset/ratebeer/{}/test_combined.json'.format(dataset_name)
         with open(id2feature_file, 'r') as f:
             print("Load file: {}".format(id2feature_file))
             self.d_id2feature = json.load(f)
@@ -161,6 +172,33 @@ class EVAL(object):
             print("Load file: {}".format(trainset_sentid2featuretfidf_file))
             self.d_trainset_sentid2featuretfidf = json.load(f)
         # Get trainset sid2featuretf dict
+        # Load train/test combined review for standard evaluation
+        self.d_trainset_combined = dict()
+        with open(trainset_combined_file, 'r') as f:
+            for line in f:
+                line_data = json.loads(line)
+                userid = line_data['user']
+                itemid = line_data['item']
+                review_text = line_data['review']
+                if userid not in self.d_trainset_combined:
+                    self.d_trainset_combined[userid] = dict()
+                    self.d_trainset_combined[userid][itemid] = review_text
+                else:
+                    assert itemid not in self.d_trainset_combined[userid]
+                    self.d_trainset_combined[userid][itemid] = review_text
+        self.d_testset_combined = dict()
+        with open(testset_combined_file, 'r') as f:
+            for line in f:
+                line_data = json.loads(line)
+                userid = line_data['user']
+                itemid = line_data['item']
+                review_text = line_data['review']
+                if userid not in self.d_testset_combined:
+                    self.d_testset_combined[userid] = dict()
+                    self.d_testset_combined[userid][itemid] = review_text
+                else:
+                    assert itemid not in self.d_testset_combined[userid]
+                    self.d_testset_combined[userid][itemid] = review_text
 
         # Get the sid2featuretf dict (on Valid/Test Set)
         self.d_testset_sid2featuretf = self.get_sid2featuretf_eval(
@@ -255,8 +293,6 @@ class EVAL(object):
         print("train data feature node num", np.mean(f_num))
         print("train data sentence node num", np.mean(s_num))
 
-
-
     def f_cluster_embedding(self):
 
         # self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
@@ -332,23 +368,10 @@ class EVAL(object):
         2. Add mojority vote based baselines.
         3. Seperate code chunks into functions.
         """
-        rouge_1_f_list = []
-        rouge_1_p_list = []
-        rouge_1_r_list = []
-
-        rouge_2_f_list = []
-        rouge_2_p_list = []
-        rouge_2_r_list = []
-
-        rouge_l_f_list = []
-        rouge_l_p_list = []
-        rouge_l_r_list = []
-
-        bleu_list = []
-        bleu_1_list = []
-        bleu_2_list = []
-        bleu_3_list = []
-        bleu_4_list = []
+        rouge_1_f_list, rouge_1_p_list, rouge_1_r_list = [], [], []
+        rouge_2_f_list, rouge_2_p_list, rouge_2_r_list = [], [], []
+        rouge_l_f_list, rouge_l_p_list, rouge_l_r_list = [], [], []
+        bleu_list, bleu_1_list, bleu_2_list, bleu_3_list, bleu_4_list = [], [], [], [], []
 
         rouge = Rouge()
         num_empty_hyps = 0
@@ -368,11 +391,7 @@ class EVAL(object):
 
         # debug_index = 0
         s_topk = self.select_s_topk
-        s_topk_candidate = 20
-
-        # already got feature2fid mapping, need the reverse
-        self.m_fid2feature = {value: key for key, value in self.m_feature2fid.items()}
-        # print(self.m_feture2fid)
+        s_topk_candidate = 3
 
         cnt_useritem_pair = 0
         cnt_useritem_batch = 0
@@ -502,6 +521,10 @@ class EVAL(object):
                 elif use_blocking:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_blocking_sent_prediction(
                         s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate
+                    )
+                elif use_trigram_feat_unigram_blocking:
+                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_unigram_blocking_sent_prediction(
+                        s_logits, sids, s_masks, n_win=3, topk=s_topk, topk_cdd=s_topk_candidate
                     )
                 elif use_filtering:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.bleu_filtering_sent_prediction(
@@ -650,21 +673,42 @@ class EVAL(object):
                         hyps_file = os.path.join(self.m_eval_output_path, 'hypothesis.txt')
                         refs_json_file = os.path.join(self.m_eval_output_path, 'refs.json')
                         hyps_json_file = os.path.join(self.m_eval_output_path, 'hyps.json')
+                        # Get the true combined reference text in data
+                        true_combined_ref = self.d_testset_combined[true_userid_j][true_itemid_j]
                         # write reference raw text
                         with open(refs_file, 'a') as f_ref:
-                            f_ref.write(refs_j)
+                            # f_ref.write(refs_j)
+                            f_ref.write(true_combined_ref)
                             f_ref.write("\n")
                         # write reference raw text with user/item id
                         with open(refs_json_file, 'a') as f_ref_json:
+                            # cur_ref_json = {
+                            #     'user': true_userid_j, 'item': true_itemid_j, 'text': refs_j
+                            # }
                             cur_ref_json = {
-                                'user': true_userid_j, 'item': true_itemid_j, 'text': refs_j
+                                'user': true_userid_j, 'item': true_itemid_j, 'text': true_combined_ref
                             }
                             json.dump(cur_ref_json, f_ref_json)
                             f_ref_json.write("\n")
                         if use_majority_vote_popularity:
                             cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                            hyps_pop, _, _ = self.majority_vote_popularity(
+                            hyps_pop, _, _, _ = self.majority_vote_popularity(
                                 true_userid_j, true_itemid_j, cur_cdd_sents, topk=s_topk)
+                            with open(hyps_file, 'a') as f_hyp:
+                                f_hyp.write(hyps_pop)
+                                f_hyp.write("\n")
+                            with open(hyps_json_file, 'a') as f_hyp_json:
+                                cur_hyp_json = {
+                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_pop
+                                }
+                                json.dump(cur_hyp_json, f_hyp_json)
+                                f_hyp_json.write("\n")
+                        elif use_majority_vote_popularity_itemside:
+                            cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
+                            # Get item-side feature ids
+                            item_featureids = set(self.d_trainset_item2featuretf[true_itemid_j].keys())
+                            hyps_pop, _, _, _ = self.majority_vote_popularity_itemside(
+                                true_userid_j, true_itemid_j, cur_cdd_sents, item_featureids, topk=s_topk)
                             with open(hyps_file, 'a') as f_hyp:
                                 f_hyp.write(hyps_pop)
                                 f_hyp.write("\n")
@@ -836,7 +880,87 @@ class EVAL(object):
                 #     print("Number of sentences for each target review (on average): {}".format(
                 #         self.m_mean_num_sents_per_target_review), file=f)
 
-    def ngram_blocking(self, sents, p_sent, n_win, k):
+    def trigram_feat_unigram_blocking(self, sents, p_sent, n_win=3, topk=5, use_feat_freq_in_sent=False):
+        """ a combination of trigram blocking and soft feature-unigram blocking
+        :param sents:   batch of list of candidate sentence, each candidate sentence is a string.
+                        shape: (batch_size, sent_num)
+        :param p_sent:  torch tensor. batch of predicted scores of each candidate sentence.
+                        shape: (batch_size, sent_num)
+        :param topk:    we are selecting the top-k sentences.
+        :param use_feat_freq_in_sent:  when compute the unigram feature word blocking,
+                        using the frequency of the feature word in the sentence or only set the frequency
+                        to be 1 when a feature appears in the sentence (regardless of real freq in that sent).
+
+        :return:        selected index of sids
+        """
+
+        batch_size = p_sent.size(0)
+        batch_select_idx, batch_select_proba, batch_select_rank = [], [], []
+        feat_overlap_threshold = 1
+        # 1. Perform trigram blocking, get the top-100 predicted sentences
+        batch_select_idx_trigram, batch_select_proba_trigram, batch_select_rank_trigram = self.ngram_blocking(
+            sents=sents, p_sent=p_sent, n_win=n_win, k=100
+        )
+        # 2. Perform feature-unigram blocking
+        for batch_idx in range(batch_size):
+            feat_word_freq = dict()
+            select_idx, select_proba, select_rank = [], [], []
+            for idx, sent_idx in enumerate(batch_select_idx_trigram[batch_idx]):
+                cur_sent = sents[batch_idx][sent_idx]
+                cur_words = cur_sent.split()
+                block_flag = False
+                cur_feature_words = dict()
+                for word in cur_words:
+                    # check if this word is feature word
+                    if word in self.d_feature2id.keys():
+                        if word in cur_feature_words:
+                            cur_feature_words[word] += 1
+                        else:
+                            cur_feature_words[word] = 1
+                if use_feat_freq_in_sent:
+                    for word, freq in cur_feature_words.items():
+                        if word in feat_word_freq:
+                            if freq + feat_word_freq[word] > feat_overlap_threshold:
+                                block_flag = True
+                                break
+                        else:
+                            if freq > 2:
+                                block_flag = True
+                                break
+                    if not block_flag:
+                        select_idx.append(sent_idx)
+                        select_proba.append(batch_select_proba_trigram[batch_idx][idx])
+                        select_rank.append(batch_select_rank_trigram[batch_idx][idx])
+                        for word, freq in cur_feature_words.items():
+                            if word in feat_word_freq:
+                                feat_word_freq[word] += freq
+                            else:
+                                feat_word_freq[word] = freq
+                else:
+                    for word in cur_feature_words.keys():
+                        if word in feat_word_freq:
+                            if feat_word_freq[word] == feat_overlap_threshold:
+                                block_flag = True
+                                break
+                    if not block_flag:
+                        select_idx.append(sent_idx)
+                        select_proba.append(batch_select_proba_trigram[batch_idx][idx])
+                        select_rank.append(batch_select_rank_trigram[batch_idx][idx])
+                        for word in cur_feature_words.keys():
+                            if word in feat_word_freq:
+                                feat_word_freq[word] += 1
+                            else:
+                                feat_word_freq[word] = 1
+                        if len(select_idx) >= topk:
+                            break
+            batch_select_idx.append(select_idx)
+            batch_select_proba.append(select_proba)
+            batch_select_rank.append(select_rank)
+        # # convert list to torch tensor, which is used for later gather element by index
+        # batch_select_idx = torch.LongTensor(batch_select_idx)
+        return batch_select_idx, batch_select_proba, batch_select_rank
+
+    def ngram_blocking(self, sents, p_sent, n_win, k, use_topk=True):
         """ ngram blocking
         :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
         :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
@@ -846,26 +970,17 @@ class EVAL(object):
         :return:        selected index of sids
         """
         batch_size = p_sent.size(0)
-        batch_select_idx = []
-        batch_select_proba = []
-        batch_select_rank = []
+        batch_select_idx, batch_select_proba, batch_select_rank = [], [], []
         assert len(sents) == len(p_sent)
         assert len(sents) == batch_size
         assert len(sents[0]) == len(p_sent[0])
-        # print(sents)
-        # print("batch size (sents): {}".format(len(sents)))
         for i in range(len(sents)):
-            # print(len(sents[i]))
             assert len(sents[i]) == len(sents[0])
             assert len(sents[i]) == len(p_sent[i])
-        # print(p_sent)
-        # print(p_sent.shape)
         for batch_idx in range(batch_size):
             ngram_list = []
             _, sorted_idx = p_sent[batch_idx].sort(descending=True)
-            select_idx = []
-            select_proba = []
-            select_rank = []
+            select_idx, select_proba, select_rank = [], [], []
             idx_rank = 0
             for idx in sorted_idx:
                 idx_rank += 1
@@ -884,17 +999,20 @@ class EVAL(object):
                     else:
                         cur_sent_ngrams.append(this_ngram)
                 if not overlap_flag:
+                    if p_sent[batch_idx][idx] < 0.0:
+                        # this suggest that this idx is already the pad idx
+                        break
                     select_idx.append(idx)
                     select_proba.append(p_sent[batch_idx][idx])
                     select_rank.append(idx_rank)
                     ngram_list.extend(cur_sent_ngrams)
-                    if len(select_idx) >= k:
+                    if use_topk and len(select_idx) >= k:
                         break
             batch_select_idx.append(select_idx)
             batch_select_proba.append(select_proba)
             batch_select_rank.append(select_rank)
-        # convert list to torch tensor
-        batch_select_idx = torch.LongTensor(batch_select_idx)
+        # # convert list to torch tensor
+        # batch_select_idx = torch.LongTensor(batch_select_idx)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
     def bleu_filtering(self, sents, p_sent, k, filter_value=0.25):
@@ -990,7 +1108,6 @@ class EVAL(object):
         assert len(sids) == s_logits.size(0)      # this is the batch size
         for i in range(batch_size):
             cur_sents_content = []
-            assert len(sids[i]) == len(sids[0])
             for cur_sid in sids[i]:
                 cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
             batch_sents_content.append(cur_sents_content)
@@ -1001,13 +1118,60 @@ class EVAL(object):
         ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(
             batch_sents_content, masked_s_logits, n_win=3, k=topk
         )
-        pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
+        # pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
+        pred_sids = []
+        for i in range(batch_size):
+            pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(ngram_block_pred_snids[i])))
         topk_logits = ngram_block_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(
             batch_sents_content, masked_s_logits, n_win=3, k=topk_cdd
         )
-        top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
+        # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
+        top_cdd_pred_sids = []
+        for i in range(batch_size):
+            top_cdd_pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(top_cdd_pred_snids[i])))
+        # 3. get the bottom-20 predicted sentences' content and proba
+        reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
+        bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
+
+        return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
+
+    def trigram_unigram_blocking_sent_prediction(self, s_logits, sids, s_masks, n_win=3, topk=5, topk_cdd=20):
+        """use trigram blocking and soft unigram feature word blocking
+        :param: s_logits:
+        :param: sids:
+        :param: s_masks:
+        :param: topk:      select the top-k sentence. default: 5
+        :param: topk_cdd:  sanity check. select the top-k candidate sentences, used to tune topk. default: 20
+        """
+        batch_sents_content = []
+        assert sids.size(0) == s_logits.size(0)     # this is the batch_size
+        batch_size = sids.size(0)
+        for i in range(batch_size):
+            cur_sents_content = []
+            for cur_sid in sids[i]:
+                cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
+            batch_sents_content.append(cur_sents_content)
+        masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        sids = sids.cpu()
+        # 1. get the top-k predicted sentences which form the hypothesis
+        trigram_feat_block_pred_snids, trigram_feat_block_pred_proba, trigram_feat_block_pred_rank = self.trigram_feat_unigram_blocking(
+            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk, use_feat_freq_in_sent=False
+        )
+        pred_sids = []
+        for i in range(batch_size):
+            pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(trigram_feat_block_pred_snids[i])))
+        topk_logits = trigram_feat_block_pred_proba
+        # 2. get the top-20 predicted sentences' content and proba
+        top_cdd_pred_snids, top_cdd_logits, _ = self.trigram_feat_unigram_blocking(
+            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk_cdd, use_feat_freq_in_sent=False
+        )
+        # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
+        top_cdd_pred_sids = []
+        for i in range(batch_size):
+            top_cdd_pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(top_cdd_pred_snids[i])))
         # 3. get the bottom-20 predicted sentences' content and proba
         reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
         bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
@@ -1175,6 +1339,29 @@ class EVAL(object):
             topk=topk)
         return hyps, hyps_sent_list, topk_cdd_scores, hyps_sent_feature_scores
 
+    def majority_vote_popularity_itemside(self, user_id, item_id, cdd_sents, item_features, topk=3):
+        # Get this user-item pairs cdd sentences union item-side feature tf-value
+        cdd_featuretf = dict()
+        for sent_id in cdd_sents:
+            cur_featuretf = self.d_trainset_sentid2featuretf[sent_id]
+            for key, value in cur_featuretf.items():
+                feature_id = key
+                assert isinstance(feature_id, str)
+                feature_tf = value
+                assert isinstance(feature_tf, int)
+                if feature_id in item_features:
+                    if feature_id not in cdd_featuretf:
+                        cdd_featuretf[feature_id] = feature_tf
+                    else:
+                        cdd_featuretf[feature_id] += feature_tf
+        # cdd sentence selection based on score function of item-side cdd_featuretf
+        hyps, hyps_sent_list, topk_cdd_scores, hyps_sent_feature_scores = self.mojority_vote_selection_itemside(
+            cdd_sents=cdd_sents,
+            feature_score=cdd_featuretf,
+            item_features=item_features,
+            topk=topk)
+        return hyps, hyps_sent_list, topk_cdd_scores, hyps_sent_feature_scores
+
     def majority_vote_predicted_feature(self, user_id, item_id, cdd_sents, f_logits, featureids, topk=3):
         # Get each feature's predicted score
         feature_pred_score = dict()
@@ -1209,6 +1396,50 @@ class EVAL(object):
             assert cur_num_features > 0
             # normalize the cumu score by the number of features in this sentence
             cur_cdd_score = cur_cdd_score / cur_num_features
+            cdd_scores.append(cur_cdd_score)
+            cdd_sentid_to_featureid_scores[sent_id] = feature_score_dict
+        # Get the topk cdd sentences based on the cdd_scores
+        cdd_scores_th = torch.tensor(cdd_scores).cpu()
+        topk_cdd_scores, topk_cdd_indices = torch.topk(cdd_scores_th, topk)
+        # Construct the hypothesis based on the topk cdd sents
+        hyps_sent_list = list()
+        hyps_sent_feature_scores = list()
+        for idx in topk_cdd_indices:
+            sent_id = cdd_sents[idx]        # this is sentence id
+            sent_content = self.d_trainset_id2sent[sent_id]
+            hyps_sent_list.append(sent_content)
+            hyps_sent_feature_scores.append(cdd_sentid_to_featureid_scores[sent_id])
+        hyps = " ".join(hyps_sent_list)
+        return hyps, hyps_sent_list, topk_cdd_scores, hyps_sent_feature_scores
+
+    def mojority_vote_selection_itemside(self, cdd_sents, feature_score, item_features, topk=3):
+        # Compute the score for each cdd sentence
+        cdd_scores = list()
+        cdd_sentid_to_featureid_scores = dict()
+        for sent_id in cdd_sents:
+            # get the feature tf-value dict of this sent
+            cur_featuretf = self.d_trainset_sentid2featuretf[sent_id]
+            # count total number of features
+            cur_num_features = 0
+            cur_cdd_score = 0.0
+            feature_score_dict = dict()
+            for key, value in cur_featuretf.items():
+                feature_id = key
+                feature_tf = value
+                # only consider features from the item-side
+                if feature_id in item_features:
+                    cur_num_features += feature_tf
+                    feature_weighted_score = feature_score[feature_id] * feature_tf
+                    cur_cdd_score += feature_weighted_score
+                    feature_score_dict[feature_id] = feature_weighted_score
+            # This assertation may not be correct since some of the cdd sentences
+            # may come from user-side and have no item features.
+            # assert cur_num_features > 0
+            # normalize the cumu score by the number of features in this sentence
+            if cur_num_features > 0:
+                cur_cdd_score = cur_cdd_score / cur_num_features
+            else:
+                cur_cdd_score = 0.0
             cdd_scores.append(cur_cdd_score)
             cdd_sentid_to_featureid_scores[sent_id] = feature_score_dict
         # Get the topk cdd sentences based on the cdd_scores

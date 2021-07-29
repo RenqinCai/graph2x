@@ -44,6 +44,37 @@ class EVAL(object):
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
         print("Dataset: {}".format(dataset_name))
 
+        # Load the combined train/test set
+        trainset_combined_file = '../../Dataset/ratebeer/{}/train_combined.json'.format(dataset_name)
+        testset_combined_file = '../../Dataset/ratebeer/{}/test_combined.json'.format(dataset_name)
+        # Load train/test combined review for standard evaluation
+        self.d_trainset_combined = dict()
+        with open(trainset_combined_file, 'r') as f:
+            for line in f:
+                line_data = json.loads(line)
+                userid = line_data['user']
+                itemid = line_data['item']
+                review_text = line_data['review']
+                if userid not in self.d_trainset_combined:
+                    self.d_trainset_combined[userid] = dict()
+                    self.d_trainset_combined[userid][itemid] = review_text
+                else:
+                    assert itemid not in self.d_trainset_combined[userid]
+                    self.d_trainset_combined[userid][itemid] = review_text
+        self.d_testset_combined = dict()
+        with open(testset_combined_file, 'r') as f:
+            for line in f:
+                line_data = json.loads(line)
+                userid = line_data['user']
+                itemid = line_data['item']
+                review_text = line_data['review']
+                if userid not in self.d_testset_combined:
+                    self.d_testset_combined[userid] = dict()
+                    self.d_testset_combined[userid][itemid] = review_text
+                else:
+                    assert itemid not in self.d_testset_combined[userid]
+                    self.d_testset_combined[userid][itemid] = review_text
+
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
             print("reload model")
@@ -60,75 +91,6 @@ class EVAL(object):
         print("start eval ...")
         # self.f_cluster_embedding()
         self.f_eval_new(train_data, valid_data, test_data)
-
-    def f_cluster_embedding(self):
-
-        # self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
-
-        # embeds = self.m_network.m_item_embed.weight.data.cpu().numpy()
-        # item_num = len(embeds)
-        # labels = [self.m_iid2item[i] for i in range(item_num)]
-
-        # tsne_model = TSNE(perplexity=40, n_components=2, init='pca', n_iter=2500, random_state=23)
-        # new_values = tsne_model.fit_transform(embeds)
-
-        # x = []
-        # y = []
-        # for value in new_values:
-        #     x.append(value[0])
-        #     y.append(value[1])
-            
-        # plt.figure(figsize=(16, 16)) 
-        # for i in range(len(x)):
-        #     plt.scatter(x[i],y[i])
-        #     plt.annotate(labels[i],
-        #                 xy=(x[i], y[i]),
-        #                 xytext=(5, 2),
-        #                 textcoords='offset points',
-        #                 ha='right',
-        #                 va='bottom')
-        # plt.savefig("item_embed_tsne.png")
-
-        # m_item_embed is a nn.Embedding layer which maps m_item_num to item_embed_size
-        embeds_item = self.m_network.m_item_embed.weight.data.cpu().numpy()
-        embeds_feature = self.m_network.m_feature_embed.weight.data.cpu().numpy()
-
-        print("item embedding shape: {}".format(embeds_item.shape))
-        print("feature embedding shape: {}".format(embeds_feature.shape))
-        item_num = len(embeds_item)
-        feature_num = len(embeds_feature)       # for small dataset, this should be 800
-        # find the true item that correponding to the iid
-        labels_item = [self.m_iid2item[i] for i in range(item_num)]
-        labels_feature = [self.m_fid2feature[i] for i in range(feature_num)]    # this is the featureid
-        # not using feature id, but using true feature
-        labels_feature_text = [self.d_id2feature[labels_feature[i]] for i in range(feature_num)]
-
-        # dump the label (item/feature) into file
-        with open('../embeddings/item_labels_{}.pkl'.format(dataset_name), 'wb') as f:
-            pickle.dump(labels_item, f)
-        with open('../embeddings/feature_labels_{}.pkl'.format(dataset_name), 'wb') as f:
-            pickle.dump(labels_feature_text, f)
-        # save item/feature embeddings into file
-        with open('../embeddings/item_embs_{}.npy'.format(dataset_name), 'wb') as f:
-            np.save(f, embeds_item)
-        print("Item embeddings saved!")
-        with open('../embeddings/feature_embs_{}.npy'.format(dataset_name), 'wb') as f:
-            np.save(f, embeds_feature)
-        print("Feature embeddings saved!")
-
-        for i in range(item_num):
-            if np.isnan(embeds_item[i]).any():
-                print("item {} has NaN embedding!".format(i))
-
-        for i in range(feature_num):
-            if np.isnan(embeds_feature[i]).any():
-                print("feature {} has NaN embedding!".format(i))
-
-        print("Skip TSNE ... ")
-        # # draw the tsne clustering figure of item/feature embeddings
-        # print("In tsne ... ")
-
-        print("Finish clustering")
 
     def f_eval_new(self, train_data, valid_data, test_data):
         rouge_1_f_list, rouge_1_p_list, rouge_1_r_list = [], [], []
@@ -204,6 +166,10 @@ class EVAL(object):
                     if hyps_j == '':
                         hyps_j = self.m_vocab.unk_token
 
+                    true_user_id_j = true_user_ids[j]
+                    true_item_id_j = true_item_ids[j]
+                    true_combined_ref = self.d_testset_combined[true_user_id_j][true_item_id_j]
+
                     if save_hyps_refs:
                         # Compute ROUGE/BLEU score
                         # Save refs and selected hyps into file
@@ -213,12 +179,16 @@ class EVAL(object):
                         hyps_json_file = os.path.join(self.m_eval_output_path, 'hyps.json')
                         # write reference raw text
                         with open(refs_file, 'a') as f_ref:
-                            f_ref.write(refs_j)
+                            # f_ref.write(refs_j)
+                            f_ref.write(true_combined_ref)
                             f_ref.write("\n")
                         # write reference raw text with user/item id
                         with open(refs_json_file, 'a') as f_ref_json:
+                            # cur_ref_json = {
+                            #     'user': true_user_id_j, 'item': true_item_id_j, 'text': refs_j
+                            # }
                             cur_ref_json = {
-                                'user': true_user_ids[j], 'item': true_item_ids[j], 'text': refs_j
+                                'user': true_user_id_j, 'item': true_item_id_j, 'text': true_combined_ref
                             }
                             json.dump(cur_ref_json, f_ref_json)
                             f_ref_json.write("\n")
@@ -229,13 +199,14 @@ class EVAL(object):
                         # write hypothesis raw text with user/item id
                         with open(hyps_json_file, 'a') as f_hyp_json:
                             cur_hyp_json = {
-                                'user': true_user_ids[j], 'item': true_item_ids[j], 'text': hyps_j
+                                'user': true_user_id_j, 'item': true_item_id_j, 'text': hyps_j
                             }
                             json.dump(cur_hyp_json, f_hyp_json)
                             f_hyp_json.write("\n")
 
                     if compute_rouge_score:
-                        scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+                        # scores_j = rouge.get_scores(hyps_j, refs_j, avg=True)
+                        scores_j = rouge.get_scores(hyps_j, true_combined_ref, avg=True)
 
                         rouge_1_f_list.append(scores_j["rouge-1"]["f"])
                         rouge_1_r_list.append(scores_j["rouge-1"]["r"])
@@ -250,10 +221,13 @@ class EVAL(object):
                         rouge_l_p_list.append(scores_j["rouge-l"]["p"])
 
                     if compute_bleu_score:
-                        bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
+                        # bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
+                        bleu_scores_j = compute_bleu(
+                            [[true_combined_ref.split()]], [hyps_j.split()])
                         bleu_list.append(bleu_scores_j)
 
-                        bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
+                        (bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j,
+                            bleu_4_scores_j) = get_sentence_bleu([true_combined_ref.split()], hyps_j.split())
 
                         bleu_1_list.append(bleu_1_scores_j)
                         bleu_2_list.append(bleu_2_scores_j)

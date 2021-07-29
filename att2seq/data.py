@@ -112,6 +112,83 @@ class DATA():
 
         return train_iter, val_iter, test_iter, vocab_obj
 
+    def f_load_rnn_ratebeer_1(self, data_name, data_dir, verbose, batch_size, batch_size_eval):
+        self.m_data_name = data_name
+        # get the data directory path of the train/val/test json file
+
+        # Extract item and user data
+        # Since we don't need tokenization, sequential is set to False
+        item = data.Field(sequential=False)
+        user = data.Field(sequential=False)
+        text = data.Field(
+            sequential=True,
+            init_token="<sos>",
+            eos_token="<eos>",
+            lower=True)
+
+        # Extract rating data
+        # Since the rating is then fed into the embedding layer, it should also be dtype of torch.long(default)
+        rating = data.Field(
+            sequential=False,
+            use_vocab=False)
+
+        if verbose:
+            print('Loading datasets...')
+
+        train, val, test = data.TabularDataset.splits(
+            path=data_dir,
+            train='train_combined.json',
+            test='test_combined.json',
+            validation='valid_combined.json',
+            format='json',
+            fields={
+                'item': ('item', item),
+                'user': ('user', user),
+                'review': ('text', text),
+                'rating': ('rating', rating)
+            }
+        )
+
+        if verbose:
+            print('datasets loaded')
+
+        item.build_vocab(train)
+        if verbose:
+            print('item vocab built')
+
+        user.build_vocab(train)
+        if verbose:
+            print('user vocab built')
+
+        text.build_vocab(train.text, min_freq=1, max_size=None)
+        if verbose:
+            print('text vocab built')
+
+        train_iter, val_iter, test_iter = data.Iterator.splits(
+            datasets=(train, val, test),
+            batch_sizes=(batch_size, batch_size_eval, batch_size_eval),
+            repeat=False,
+            shuffle=False,
+            sort=False,
+            device=self.device
+        )
+
+        print('Number of batches in 1 training epoch: {}'.format(len(train_iter)))
+        print('Number of batches in 1 validation epoch: {}'.format(len(val_iter)))
+        print('Number of batches in 1 testing epoch: {}'.format(len(test_iter)))
+
+        print('============== Dataset Loaded ==============')
+
+        # construct the vocab object
+        vocab_obj = Vocab(
+            user_vocab=user.vocab,
+            item_vocab=item.vocab,
+            text_vocab=text.vocab,
+            text_field=text
+        )
+
+        return train_iter, val_iter, test_iter, vocab_obj
+
 
 # # DATA without rating
 # class DATA():

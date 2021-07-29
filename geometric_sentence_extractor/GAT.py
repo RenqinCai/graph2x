@@ -21,7 +21,8 @@ class GATNET(torch.nn.Module):
         ### e_1: edge attention weights (edge_index, attention_weights) 
             x_1, e_1 = self.gat_layer_1(x_0, edge_index, return_attention_weights=True)
         else:
-            x_1 = self.gat_layer_1(x_0, edge_index, return_attention_weights=True)
+            x_1 = self.gat_layer_1(x_0, edge_index)
+
         x_1 = F.elu(x_1)
 
         x_1 = F.dropout(x_1, p=0.6, training=self.training)
@@ -29,10 +30,9 @@ class GATNET(torch.nn.Module):
         if attention_flag:
             x_2, e_2 = self.gat_layer_2(x_1, edge_index, return_attention_weights=True)
         else:
-            x_2 = self.gat_layer_2(x_1, edge_index, return_attention_weights=True)
+            x_2 = self.gat_layer_2(x_1, edge_index)
 
         if attention_flag:
             return x_2, e_1, e_2
         else:
             return x_2
-

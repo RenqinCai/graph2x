@@ -108,7 +108,6 @@ def main(args):
         logger_obj.f_close_writer()
 
     if args.eval:
-        # TODO: Implement Evaluation
         print("="*10, "eval", "="*10)
         print("Start evaluation...")
         network.set_tf_ratio(0.0)       # teacher forcing ratio should be assigned as 0

@@ -176,8 +176,8 @@ class Att2Seq(nn.Module):
         # tensor to store decoder outputs
         outputs = torch.zeros(text_length, batch_size, text_vocab_size).to(self.device)
 
-        # de-activate rating
         hidden, user_embed, item_embed, rating_embed = self.encoder(user, item, rating)
+        # de-activate rating
         # hidden, user_embed, item_embed = self.encoder(user, item, rating)
 
         # construct initial hidden state

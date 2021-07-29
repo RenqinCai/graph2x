@@ -17,6 +17,7 @@ from train import TRAINER
 from model import GraphX
 from eval import EVAL
 from eval_feature import EVAL_FEATURE
+from eval_embed import EVAL_EMBED
 
 
 def set_seed(seed):
@@ -92,22 +93,24 @@ def main(args):
         print("="*10, "eval", "="*10)
 
         if args.eval_feature:
-            print("Start feature prediction evaluation...")
+            print("Start feature prediction evaluation ...")
             eval_obj = EVAL_FEATURE(vocab_obj, args, device)
-
             network = network.to(device)
-
             eval_obj.f_init_eval(network, args.model_file, reload_model=True)
-
             eval_obj.f_eval(train_data, valid_data)
-        else:
-            print("Start sentence prediction evaluation...")
-            eval_obj = EVAL(vocab_obj, args, device)
 
+        elif args.eval_embed:
+            print("Start feature & sentence embedding evaluation ...")
+            eval_obj = EVAL_EMBED(vocab_obj, args, device)
             network = network.to(device)
-
             eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+            eval_obj.f_eval(train_data, valid_data)
 
+        else:
+            print("Start sentence prediction evaluation ...")
+            eval_obj = EVAL(vocab_obj, args, device)
+            network = network.to(device)
+            eval_obj.f_init_eval(network, args.model_file, reload_model=True)
             eval_obj.f_eval(train_data, valid_data)
 
 
@@ -161,7 +164,7 @@ if __name__ == "__main__":
     # parser.add_argument('--init_mult', type=float, default=1.0)
     # parser.add_argument('--variance', type=float, default=0.995)
     # parser.add_argument('--max_seq_length', type=int, default=100)
-    parser.add_argument('--select_topk_s', type=int, default=3)
+    parser.add_argument('--select_topk_s', type=int, default=5)
     parser.add_argument('--select_topk_f', type=int, default=15)
 
     ### others
@@ -169,6 +172,7 @@ if __name__ == "__main__":
     parser.add_argument('--test', action='store_true', default=False)
     parser.add_argument('--eval', action='store_true', default=False)
     parser.add_argument('--eval_feature', action='store_true', default=False)
+    parser.add_argument('--eval_embed', action='store_true', default=False)
     parser.add_argument('--parallel', action="store_true", default=False)
     parser.add_argument('--local_rank', type=int, default=0)
 

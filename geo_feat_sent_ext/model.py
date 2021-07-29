@@ -38,7 +38,7 @@ class GraphX(nn.Module):
         self.m_item_embed = nn.Embedding(self.m_item_num, args.item_embed_size)
 
         self.m_feature_embed = nn.Embedding(self.m_feature_num, args.feature_embed_size)
-        
+
         # self.m_feature_embed = vocab_obj.m_fid2fembed
         self.m_feature_embed_size = args.feature_embed_size
         self.f_load_feature_embedding(vocab_obj.m_fid2fembed)
@@ -47,7 +47,7 @@ class GraphX(nn.Module):
         # self.m_sent_embed = vocab_obj.m_sid2sembed
         self.m_sent_embed_size = args.sent_embed_size
         self.f_load_sent_embedding(vocab_obj.m_sid2sembed)
-       
+
         self.sent_state_proj = nn.Linear(args.sent_embed_size, args.hidden_size, bias=False)
         self.feature_state_proj = nn.Linear(args.feature_embed_size, args.hidden_size, bias=False)
         self.user_state_proj = nn.Linear(args.user_embed_size, args.hidden_size, bias=False)
@@ -170,9 +170,9 @@ class GraphX(nn.Module):
             debug_nnum_i = batch_fnum[i]+batch_snum[i]
             assert nnum_i == debug_nnum_i, "error node num"
             # print("debug", debug_nnum_i, nnum_i)
-        
+
         x = torch.cat(x_batch, dim=0)
-      
+
         # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
         # print("x", x)
@@ -219,7 +219,7 @@ class GraphX(nn.Module):
         ## init node embeddings
 
         ##### feature node
-        
+
         batch_size = graph_batch.num_graphs
 
         fid = graph_batch.f_rawid
@@ -361,7 +361,7 @@ class GraphX(nn.Module):
 
         #### hidden_s_batch: batch_size*max_s_num_batch*hidden_size
         hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
-        
+
         ### sid_batch: batch_size*max_s_num_batch
         sid_batch = torch.cat(sid_batch, dim=0)
 

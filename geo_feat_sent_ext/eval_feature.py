@@ -19,7 +19,6 @@ from metric import get_feature_recall_precision, get_recall_precision_f1, get_re
 from metric import get_recall_precision_f1_gt, get_recall_precision_f1_gt_random
 from rouge import Rouge
 from nltk.translate import bleu_score
-import dgl
 import pickle
 import random
 
@@ -28,11 +27,9 @@ dataset_name = 'medium_500_pure'
 label_format = 'soft_label'
 
 # how to select the top-predicted sentences
-use_origin = False
-use_trigram = True
-use_trigram_feat_unigram_blocking = False
+use_origin = True
+use_trigram = False
 use_bleu_filter = False
-bleu_filter_value = 0.25
 
 # select features randomly
 random_features = False
@@ -41,9 +38,6 @@ random_features = False
 popular_features = False
 popular_features_vs_origin = False
 popular_features_vs_trigram = False
-popular_features_itemside = False
-popular_features_itemside_vs_origin = False
-popular_features_itemside_vs_trigram = False
 
 # select features based on the feature prediction scores
 predict_features = True
@@ -53,7 +47,6 @@ predict_features_vs_trigram = False
 save_sentence_selected = False
 save_feature_selected = False
 save_feature_logits = False
-save_hyps_refs = True
 
 # True if the predicted features is compared with the ground-turth features.
 # False if the predicted features is compared with the proxy's features.
@@ -62,7 +55,7 @@ use_ground_truth = True
 avg_proxy_feature_num = 19
 avg_gt_feature_num = 15
 total_feature_num = 575
-MAX_batch_output = 2000
+MAX_batch_output = 10000
 
 
 class EVAL_FEATURE(object):
@@ -100,35 +93,26 @@ class EVAL_FEATURE(object):
 
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
         print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
-
-        print("--"*10 + "Feature Prediction" + "--"*10)
-        if predict_features_vs_origin:
-            print("Use the predict features vs. origin predict sentences.")
-        elif predict_features_vs_trigram:
-            print("Use the predict features vs. trigram predict sentences.")
-        elif random_features:
+        if random_features:
             print("Use the random features.")
-        else:
-            print("Use the predicted features based on the feature prediction scores.")
-        print("--"*10 + "Features from selected sentences" + "--"*10)
-        if use_trigram:
-            print("Use the sentence features.\nBlocking method: trigram blocking.")
-        elif use_origin:
-            print("Use the sentence features.\nBlocking method: original scores.")
-        elif use_trigram_feat_unigram_blocking:
-            print("Use the sentence features.\nBlocking method: trigram + feature unigram (threshold=1) blocking.")
-
-        print("--"*10 + "Popular features" + "--"*10)
-        if popular_features:
+        elif popular_features:
             print("Use the popular features.")
         elif popular_features_vs_origin:
             print("Use the popular features vs. origin predict sentences.")
         elif popular_features_vs_trigram:
             print("Use the popular features vs. trigram predict sentences.")
-        elif popular_features_itemside:
-            print("Use the popular features from ITEM side.")
+        elif predict_features_vs_origin:
+            print("Use the predict features vs. origin predict sentences.")
+        elif predict_features_vs_trigram:
+            print("Use the predict features vs. trigram predict sentences.")
+        elif use_trigram:
+            print("Use the features from sentence after trigram blocking.")
+        elif use_origin:
+            print("Use the features from sentence based on original scores.")
         else:
-            print("Not perform.")
+            pass
+        if predict_features:
+            print("Use the predicted features based on the feature prediction scores.")
 
         # need to load some mappings
         id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
@@ -143,9 +127,6 @@ class EVAL_FEATURE(object):
         testset_sentid2featuretf_file = '../../Dataset/ratebeer/{}/test/sentence/sentence2featuretf.json'.format(dataset_name)
         trainset_user2sentid_file = '../../Dataset/ratebeer/{}/train/user/user2sentids.json'.format(dataset_name)
         trainset_item2sentid_file = '../../Dataset/ratebeer/{}/train/item/item2sentids.json'.format(dataset_name)
-        # Load the combined train/test set
-        trainset_combined_file = '../../Dataset/ratebeer/{}/train_combined.json'.format(dataset_name)
-        testset_combined_file = '../../Dataset/ratebeer/{}/test_combined.json'.format(dataset_name)
 
         with open(id2feature_file, 'r') as f:
             print("Load file: {}".format(id2feature_file))
@@ -192,33 +173,6 @@ class EVAL_FEATURE(object):
         with open(trainset_item2sentid_file, 'r') as f:
             print("Load file: {}".format(trainset_item2sentid_file))
             self.d_trainset_item2sentid = json.load(f)
-        # Load train/test combined review for standard evaluation
-        self.d_trainset_combined = dict()
-        with open(trainset_combined_file, 'r') as f:
-            for line in f:
-                line_data = json.loads(line)
-                userid = line_data['user']
-                itemid = line_data['item']
-                review_text = line_data['review']
-                if userid not in self.d_trainset_combined:
-                    self.d_trainset_combined[userid] = dict()
-                    self.d_trainset_combined[userid][itemid] = review_text
-                else:
-                    assert itemid not in self.d_trainset_combined[userid]
-                    self.d_trainset_combined[userid][itemid] = review_text
-        self.d_testset_combined = dict()
-        with open(testset_combined_file, 'r') as f:
-            for line in f:
-                line_data = json.loads(line)
-                userid = line_data['user']
-                itemid = line_data['item']
-                review_text = line_data['review']
-                if userid not in self.d_testset_combined:
-                    self.d_testset_combined[userid] = dict()
-                    self.d_testset_combined[userid][itemid] = review_text
-                else:
-                    assert itemid not in self.d_testset_combined[userid]
-                    self.d_testset_combined[userid][itemid] = review_text
 
         print("Total number of feature: {}".format(len(self.d_id2feature)))
         global total_feature_num
@@ -260,13 +214,6 @@ class EVAL_FEATURE(object):
         f_sent_precision_list = []
         f_sent_F1_list = []
         f_sent_auc_list = []
-        # user/item side ratio of gt features
-        f_user_side_ratio_gt_list = []
-        f_item_side_ratio_gt_list = []
-        f_only_user_side_ratio_gt_list = []
-        f_only_item_side_ratio_gt_list = []
-        f_both_user_item_ratio_gt_list = []
-        f_none_user_item_ratio_gt_list = []
 
         # average features in proxy/ground-truth
         proxy_feature_num_cnt = []
@@ -274,22 +221,12 @@ class EVAL_FEATURE(object):
 
         s_topk = self.m_sentence_topk       # this is used for predict topk sentences
         s_topk_candidate = 20               # this is used for sanity check for the top/bottom topk sentneces
-        f_topk = self.m_feature_topk        # this is used for predict topk features
 
         cnt_useritem_batch = 0
         save_logging_cnt = 0
-
-        output_dir = os.path.join(self.m_eval_output_path, self.m_model_file_name)
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        feat_sent_info_json_file = os.path.join(output_dir, 'feat_sent_info_{}batch.json'.format(MAX_batch_output))
-
         self.m_network.eval()
         with torch.no_grad():
-            print("Number of training data: {}".format(len(train_data)))
             print("Number of evaluation data: {}".format(len(eval_data)))
-            print("Number of topk selected sentences: {}".format(s_topk))
-            print("Number of topk selected features: {}".format(f_topk))
 
             for graph_batch in eval_data:
                 if cnt_useritem_batch % 100 == 0:
@@ -298,20 +235,14 @@ class EVAL_FEATURE(object):
                 graph_batch = graph_batch.to(self.m_device)
 
                 # logits: batch_size*max_sen_num
-                (s_logits, sids, s_masks, target_sids,
-                    f_logits, fids, f_masks, target_f_labels, _) = self.m_network.eval_forward(graph_batch)
+                s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels = self.m_network.eval_forward(graph_batch)
                 batch_size = s_logits.size(0)
 
                 """ Get the topk predicted sentences
-                    TODO: Add BLEU Filtering here
                 """
                 if use_trigram or popular_features_vs_trigram or predict_features_vs_trigram:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_blocking_sent_prediction(
                         s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate
-                    )
-                elif use_trigram_feat_unigram_blocking:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_unigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, n_win=3, topk=s_topk, topk_cdd=s_topk_candidate
                     )
                 else:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.origin_blocking_sent_prediction(
@@ -320,8 +251,8 @@ class EVAL_FEATURE(object):
 
                 # Get the user/item id of this current graph batch.
                 # NOTE: They are not the 'real' user/item id in the dataset, still need to be mapped back.
-                userid = graph_batch.u_rawid
-                itemid = graph_batch.i_rawid
+                # userid = graph_batch.u_rawid
+                # itemid = graph_batch.i_rawid
 
                 # Decide the batch_save_flag. To get shorted results, we only print the first several batches' results
                 cnt_useritem_batch += 1
@@ -340,55 +271,50 @@ class EVAL_FEATURE(object):
 
                 # Loop through the batch
                 for j in range(batch_size):
-                    # Get the user/item id of this graph
-                    userid_j = userid[j].item()
-                    itemid_j = itemid[j].item()
-                    # get the true user/item id
-                    true_userid_j = self.m_uid2user[userid_j]
-                    true_itemid_j = self.m_iid2item[itemid_j]
+                    # # Get the user/item id of this graph
+                    # userid_j = userid[j].item()
+                    # itemid_j = itemid[j].item()
+                    # # get the true user/item id
+                    # true_userid_j = self.m_uid2user[userid_j]
+                    # true_itemid_j = self.m_iid2item[itemid_j]
 
-                    # refs_j_list = []
+                    refs_j_list = []
                     hyps_j_list = []
                     hyps_featureid_j_list = []
-                    # for sid_k in target_sids[j]:
-                    #     if isinstance(sid_k, torch.Tensor):
-                    #         refs_j_list.append(self.m_sid2swords[sid_k.item()])
-                    #     else:
-                    #         refs_j_list.append(self.m_sid2swords[sid_k])
+                    for sid_k in target_sids[j]:
+                        refs_j_list.append(self.m_sid2swords[sid_k.item()])
                     for sid_k in s_pred_sids[j]:
-                        if isinstance(sid_k, torch.Tensor):
-                            hyps_j_list.append(self.m_sid2swords[sid_k.item()])
-                            hyps_featureid_j_list.extend(self.d_trainset_sid2feature[sid_k.item()])
-                        else:
-                            hyps_j_list.append(self.m_sid2swords[sid_k])
-                            hyps_featureid_j_list.extend(self.d_trainset_sid2feature[sid_k])
+                        hyps_j_list.append(self.m_sid2swords[sid_k.item()])
+                        hyps_featureid_j_list.extend(self.d_trainset_sid2feature[sid_k.item()])
                     hyps_num_unique_features = len(set(hyps_featureid_j_list))
-                    # Get sid's user/item-side source
-                    user_item_side_source = self.get_sid_user_item_source(
-                        s_pred_sids[j], true_userid_j, true_itemid_j)
+                    
+                    # # Get sid's user/item-side source
+                    # user_item_side_source = self.get_sid_user_item_source(
+                    #     s_pred_sids[j], true_userid_j, true_itemid_j)
 
                     # Get the hyps/refs/proxy sentences content
                     hyps_j = " ".join(hyps_j_list)
-                    # refs_j = " ".join(refs_j_list)
-                    refs_j = self.d_testset_combined[true_userid_j][true_itemid_j]
-                    proxy_j_list = []
-                    for sid_k in self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][-1]:
-                        proxy_j_list.append(self.d_trainset_id2sent[sid_k])
-                    proxy_j = " ".join(proxy_j_list)
+                    refs_j = " ".join(refs_j_list)
+                    # proxy sids can be retrieved from the graph
+                    # proxy_j_list = []
+                    # for sid_k in self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][-1]:
+                    #     proxy_j_list.append(self.d_trainset_id2sent[sid_k])
+                    # proxy_j = " ".join(proxy_j_list)
 
                     # get feature prediction performance
                     # f_logits, fids, f_masks, target_f_labels
-                    f_logits_j = f_logits[j].cpu()
+                    f_logits_j = f_logits[j]
                     fid_j = fids[j].cpu()
                     mask_f_j = f_masks[j].cpu()
                     target_f_labels_j = target_f_labels[j].cpu()
 
                     # get the user-item featuretf
-                    user_to_featuretf = self.d_trainset_user2featuretf[true_userid_j]
-                    item_to_featuretf = self.d_trainset_item2featuretf[true_itemid_j]
-                    useritem_to_featuretf = self.combine_featuretf(user_to_featuretf, item_to_featuretf)
+                    useritem_to_featuretf = None
                     useritem_popular_features = None
                     ui_popular_features_freq = None
+                    # user_to_featuretf = self.d_trainset_user2featuretf[true_userid_j]
+                    # item_to_featuretf = self.d_trainset_item2featuretf[true_itemid_j]
+                    # useritem_to_featuretf = self.combine_featuretf(user_to_featuretf, item_to_featuretf)
 
                     """ Get the popular features (and the corresponding tf-value) for this user-item pair
                         The number of popular features has severla options:
@@ -407,13 +333,6 @@ class EVAL_FEATURE(object):
                         elif popular_features_vs_trigram:
                             useritem_popular_features, ui_popular_features_freq = self.get_popular_features(
                                 useritem_to_featuretf, topk=hyps_num_unique_features)
-                        elif popular_features_itemside:
-                            useritem_popular_features, ui_popular_features_freq = self.get_popular_features(
-                                item_to_featuretf, topk=self.m_feature_topk)
-                        elif popular_features_itemside_vs_origin:
-                            pass
-                        elif popular_features_itemside_vs_trigram:
-                            pass
                         else:
                             pass
                     else:
@@ -430,12 +349,12 @@ class EVAL_FEATURE(object):
                             pass
 
                     f_num_j = target_f_labels_j.size(0)
-                    mask_f_logits_j = f_logits_j[:f_num_j]
+                    mask_f_logits_j = f_logits_j[:f_num_j].cpu()
                     mask_fid_j = fid_j[:f_num_j]
                     mask_featureid_j = [self.m_fid2feature[this_f_id.item()] for this_f_id in mask_fid_j]
 
-                    if save_feature_logits and batch_save_flag:
-                        self.feature_logits_save_file(true_userid_j, true_itemid_j, mask_f_logits_j)
+                    # if save_feature_logits and batch_save_flag:
+                    #     self.feature_logits_save_file(true_userid_j, true_itemid_j, mask_f_logits_j)
 
                     # target is generated from the proxy. These features are unique features (duplications removed)
                     # get the index of the feature labels (feature labels are 1)
@@ -448,8 +367,8 @@ class EVAL_FEATURE(object):
                     target_featureword_j = [self.d_id2feature[this_fea_id] for this_fea_id in target_featureid_j]
 
                     # gt is generated from the ground-truth review. These features are unique features (duplications removed)
-                    # gt_featureid_j, _ = self.get_gt_review_featuretf(self.d_testset_sid2featuretf, target_sids[j])
-                    gt_featureid_j, _ = self.get_gt_review_featuretf_ui(true_userid_j, true_itemid_j)
+                    gt_featureid_j, _ = self.get_gt_review_featuretf(self.d_testset_sid2featuretf, target_sids[j])
+                    # gt_featureid_j, _ = self.get_gt_review_featuretf_ui(true_userid_j, true_itemid_j)
                     # get the feature word of the gt feature labels
                     gt_featureword_j = [self.d_id2feature[this_fea_id] for this_fea_id in gt_featureid_j]
 
@@ -457,16 +376,12 @@ class EVAL_FEATURE(object):
                     proxy_feature_num_cnt.append(len(target_featureword_j))
                     gt_feature_num_cnt.append(len(gt_featureword_j))
 
-                    # compute user/item side gt features ratios
-                    u_side_r, i_side_r, only_u_side_r, only_i_side_r, both_u_i_r, none_u_i_r = self.gt_feature_user_item_ratio(
-                        gt_featureid_j, user_to_featuretf, item_to_featuretf
-                    )
-                    f_user_side_ratio_gt_list.append(u_side_r)
-                    f_item_side_ratio_gt_list.append(i_side_r)
-                    f_only_user_side_ratio_gt_list.append(only_u_side_r)
-                    f_only_item_side_ratio_gt_list.append(only_i_side_r)
-                    f_both_user_item_ratio_gt_list.append(both_u_i_r)
-                    f_none_user_item_ratio_gt_list.append(none_u_i_r)
+                    # TODO: Check the percent of features that appear in the gt reivew but not the cdd reviews
+                    # for fea_id in gt_featureid_j:
+                    #     if fea_id not in useritem_to_featuretf.keys():
+                    #         print("User: {0}\tItem: {1}\tFeature id: {2}".format(
+                    #             true_userid_j, true_itemid_j, fea_id
+                    #         ))
 
                     top_pred_featureid_j = None
                     topk_preds_features_logits = None
@@ -475,21 +390,14 @@ class EVAL_FEATURE(object):
                     f_prec_j, f_recall_j, f_f1_j, f_auc_j = 0, 0, 0, 0
 
                     if use_ground_truth:
-                        # Popular Features
                         if popular_features or popular_features_vs_origin or popular_features_vs_trigram:
                             # P/R/F1/AUC of the popular features vs. gt features
                             f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = get_recall_precision_f1_popular(
                                 useritem_popular_features, gt_featureid_j, useritem_to_featuretf, total_feature_num)
-                        elif popular_features_itemside:
-                            # P/R/F1/AUC of the popular features vs. gt features
-                            f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = get_recall_precision_f1_popular(
-                                useritem_popular_features, gt_featureid_j, item_to_featuretf, total_feature_num)
-                        # Selected Sentence's Features
-                        if use_origin or use_trigram or use_trigram_feat_unigram_blocking:
+                        if use_origin or use_trigram:
                             # P/R/F1 of the selected sentences' features vs. gt features. AUC is meaningless here.
                             f_prec_j_sent, f_recall_j_sent, f_f1_j_sent, f_auc_j_sent = get_recall_precision_f1_sent(
                                 hyps_featureid_j_list, gt_featureid_j, total_feature_num)
-                        # Predicted Features / Random Features
                         if random_features:
                             # P/R/F1/AUC of the random features vs. gt features
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1_gt_random(
@@ -542,52 +450,35 @@ class EVAL_FEATURE(object):
                     f_sent_F1_list.append(f_f1_j_sent)
                     f_sent_auc_list.append(f_auc_j_sent)
 
-                    if save_hyps_refs and batch_save_flag:
-                        self.feat_sent_result_save_file(
-                            proxy_featureids=target_featureid_j,
-                            gt_featureids=gt_featureid_j,
-                            hyps_featureids=hyps_featureid_j_list,
-                            top_predict_featureids=top_pred_featureid_j,
-                            user_id=true_userid_j,
-                            item_id=true_itemid_j,
-                            ref_sents=refs_j,
-                            hyps_sents=hyps_j,
-                            proxy_sents=proxy_j,
-                            hyps_sents_list=hyps_j_list,
-                            sids_user_item_source=user_item_side_source,
-                            feat_sent_file=feat_sent_info_json_file,
-                            s_top_logits=s_topk_logits[j]
-                        )
-
-                    # Save feature results into file
-                    if save_feature_selected and batch_save_flag:
-                        self.features_result_save_file(
-                            proxy_featureids=target_featureid_j,
-                            gt_featureids=gt_featureid_j,
-                            hyps_featureids=hyps_featureid_j_list,
-                            popular_featureids=useritem_popular_features,
-                            top_predict_featureids=top_pred_featureid_j,
-                            user_id=true_userid_j,
-                            item_id=true_itemid_j,
-                            ref_sents=refs_j,
-                            hyps_sents=hyps_j,
-                            proxy_sents=proxy_j,
-                            hyps_sents_list=hyps_j_list,
-                            sids_user_item_source=user_item_side_source,
-                            f_precision=f_prec_j,
-                            f_recall=f_recall_j,
-                            f_f1=f_f1_j,
-                            f_auc=f_auc_j,
-                            f_precision_pop=f_prec_j_pop,
-                            f_recall_pop=f_recall_j_pop,
-                            f_f1_pop=f_f1_j_pop,
-                            f_auc_pop=f_auc_j_pop,
-                            f_precision_sent=f_prec_j_sent,
-                            f_recall_sent=f_recall_j_sent,
-                            f_f1_sent=f_f1_j_sent,
-                            s_top_logits=s_topk_logits[j],
-                            f_top_logits=topk_preds_features_logits
-                        )
+                    # # Save feature results into file
+                    # if save_feature_selected and batch_save_flag:
+                    #     self.features_result_save_file(
+                    #         proxy_featureids=target_featureid_j,
+                    #         gt_featureids=gt_featureid_j,
+                    #         hyps_featureids=hyps_featureid_j_list,
+                    #         popular_featureids=useritem_popular_features,
+                    #         top_predict_featureids=top_pred_featureid_j,
+                    #         user_id=true_userid_j,
+                    #         item_id=true_itemid_j,
+                    #         ref_sents=refs_j,
+                    #         hyps_sents=hyps_j,
+                    #         proxy_sents=proxy_j,
+                    #         hyps_sents_list=hyps_j_list,
+                    #         sids_user_item_source=user_item_side_source,
+                    #         f_precision=f_prec_j,
+                    #         f_recall=f_recall_j,
+                    #         f_f1=f_f1_j,
+                    #         f_auc=f_auc_j,
+                    #         f_precision_pop=f_prec_j_pop,
+                    #         f_recall_pop=f_recall_j_pop,
+                    #         f_f1_pop=f_f1_j_pop,
+                    #         f_auc_pop=f_auc_j_pop,
+                    #         f_precision_sent=f_prec_j_sent,
+                    #         f_recall_sent=f_recall_j_sent,
+                    #         f_f1_sent=f_f1_j_sent,
+                    #         s_top_logits=s_topk_logits[j],
+                    #         f_top_logits=topk_preds_features_logits
+                    #     )
         # metrics of predicted features (sentences'/multi-task/random)
         self.m_mean_f_precision = np.mean(f_precision_list)
         self.m_mean_f_recall = np.mean(f_recall_list)
@@ -605,13 +496,6 @@ class EVAL_FEATURE(object):
         # number of features (proxy/gt)
         self.m_mean_proxy_feature = np.mean(proxy_feature_num_cnt)
         self.m_mean_gt_feature = np.mean(gt_feature_num_cnt)
-        # user/item side ratio of the features
-        self.m_mean_f_user_side_ratio_gt = np.mean(f_user_side_ratio_gt_list)
-        self.m_mean_f_item_side_ratio_gt = np.mean(f_item_side_ratio_gt_list)
-        self.m_mean_f_only_user_side_ratio_gt = np.mean(f_only_user_side_ratio_gt_list)
-        self.m_mean_f_only_item_side_ratio_gt = np.mean(f_only_item_side_ratio_gt_list)
-        self.m_mean_f_both_user_item_ratio_gt = np.mean(f_both_user_item_ratio_gt_list)
-        self.m_mean_f_none_user_item_ratio_gt = np.mean(f_none_user_item_ratio_gt_list)
 
         print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
             len(eval_data), len(f_precision_list), save_logging_cnt
@@ -628,14 +512,10 @@ class EVAL_FEATURE(object):
         print("feature prediction (select sents features), precision: %.4f, recall: %.4f, F1: %.4f" % (
             self.m_mean_f_prec_hyps, self.m_mean_f_recall_hyps, self.m_mean_f_f1_hyps
         ))
-        print("GT features, user-side ratio: %.4f, item-side ratio: %.4f, only user-side ratio: %.4f, only item-side ratio: %.4f, both user item ratio: %.4f, none user-item ratio: %.4f" % (
-            self.m_mean_f_user_side_ratio_gt,
-            self.m_mean_f_item_side_ratio_gt,
-            self.m_mean_f_only_user_side_ratio_gt,
-            self.m_mean_f_only_item_side_ratio_gt,
-            self.m_mean_f_both_user_item_ratio_gt,
-            self.m_mean_f_none_user_item_ratio_gt
-        ))
+
+        output_dir = os.path.join(self.m_eval_output_path, self.m_model_file_name)
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
 
         if predict_features:
             metric_log_file = os.path.join(
@@ -663,14 +543,6 @@ class EVAL_FEATURE(object):
             ), file=f)
             print("feature prediction (select sents features), precision: %.4f, recall: %.4f, F1: %.4f" % (
                 self.m_mean_f_prec_hyps, self.m_mean_f_recall_hyps, self.m_mean_f_f1_hyps
-            ), file=f)
-            print("GT features, user-side ratio: %.4f, item-side ratio: %.4f, only user-side ratio: %.4f, only item-side ratio: %.4f, both user item ratio: %.4f, none user-item ratio: %.4f" % (
-                self.m_mean_f_user_side_ratio_gt,
-                self.m_mean_f_item_side_ratio_gt,
-                self.m_mean_f_only_user_side_ratio_gt,
-                self.m_mean_f_only_item_side_ratio_gt,
-                self.m_mean_f_both_user_item_ratio_gt,
-                self.m_mean_f_none_user_item_ratio_gt
             ), file=f)
 
     def combine_featuretf(self, user_featuretf, item_featuretf):
@@ -794,10 +666,7 @@ class EVAL_FEATURE(object):
         """
         user_item_source = []
         for sid in pred_sids:
-            if isinstance(sid, torch.Tensor):
-                sid_i = sid.item()
-            else:
-                sid_i = sid
+            sid_i = sid.item()
             ''' mapping back this sid to sentid (used in the dataset)
             since this is on trainset, we don't need minus the number of sentences
             in the trianset to get the true sentid
@@ -871,88 +740,8 @@ class EVAL_FEATURE(object):
             batch_select_proba.append(select_proba)
             batch_select_rank.append(select_rank)
         # convert list to torch tensor
-        # NOTE: remove this list to torch tensor convert
-        # batch_select_idx = torch.LongTensor(batch_select_idx)
-        # batch_select_proba = torch.tensor(batch_select_proba)
-        return batch_select_idx, batch_select_proba, batch_select_rank
-
-    def trigram_feat_unigram_blocking(self, sents, p_sent, n_win=3, topk=5, use_feat_freq_in_sent=False):
-        """ a combination of trigram blocking and soft feature-unigram blocking
-        :param sents:   batch of list of candidate sentence, each candidate sentence is a string.
-                        shape: (batch_size, sent_num)
-        :param p_sent:  torch tensor. batch of predicted scores of each candidate sentence.
-                        shape: (batch_size, sent_num)
-        :param topk:    we are selecting the top-k sentences.
-        :param use_feat_freq_in_sent:  when compute the unigram feature word blocking,
-                        using the frequency of the feature word in the sentence or only set the frequency
-                        to be 1 when a feature appears in the sentence (regardless of real freq in that sent).
-
-        :return:        selected index of sids
-        """
-
-        batch_size = p_sent.size(0)
-        batch_select_idx, batch_select_proba, batch_select_rank = [], [], []
-        feat_overlap_threshold = 1
-        # 1. Perform trigram blocking, get the top-100 predicted sentences
-        batch_select_idx_trigram, batch_select_proba_trigram, batch_select_rank_trigram = self.ngram_blocking(
-            sents=sents, p_sent=p_sent, n_win=n_win, k=100
-        )
-        # 2. Perform feature-unigram blocking
-        for batch_idx in range(batch_size):
-            feat_word_freq = dict()
-            select_idx, select_proba, select_rank = [], [], []
-            for idx, sent_idx in enumerate(batch_select_idx_trigram[batch_idx]):
-                cur_sent = sents[batch_idx][sent_idx]
-                cur_words = cur_sent.split()
-                block_flag = False
-                cur_feature_words = dict()
-                for word in cur_words:
-                    # check if this word is feature word
-                    if word in self.d_feature2id.keys():
-                        if word in cur_feature_words:
-                            cur_feature_words[word] += 1
-                        else:
-                            cur_feature_words[word] = 1
-                if use_feat_freq_in_sent:
-                    for word, freq in cur_feature_words.items():
-                        if word in feat_word_freq:
-                            if freq + feat_word_freq[word] > feat_overlap_threshold:
-                                block_flag = True
-                                break
-                        else:
-                            if freq > 2:
-                                block_flag = True
-                                break
-                    if not block_flag:
-                        select_idx.append(sent_idx)
-                        select_proba.append(batch_select_proba_trigram[batch_idx][idx])
-                        select_rank.append(batch_select_rank_trigram[batch_idx][idx])
-                        for word, freq in cur_feature_words.items():
-                            if word in feat_word_freq:
-                                feat_word_freq[word] += freq
-                            else:
-                                feat_word_freq[word] = freq
-                else:
-                    for word in cur_feature_words.keys():
-                        if word in feat_word_freq:
-                            if feat_word_freq[word] == feat_overlap_threshold:
-                                block_flag = True
-                                break
-                    if not block_flag:
-                        select_idx.append(sent_idx)
-                        select_proba.append(batch_select_proba_trigram[batch_idx][idx])
-                        select_rank.append(batch_select_rank_trigram[batch_idx][idx])
-                        for word in cur_feature_words.keys():
-                            if word in feat_word_freq:
-                                feat_word_freq[word] += 1
-                            else:
-                                feat_word_freq[word] = 1
-                        if len(select_idx) >= topk:
-                            break
-            batch_select_idx.append(select_idx)
-            batch_select_proba.append(select_proba)
-            batch_select_rank.append(select_rank)
-
+        batch_select_idx = torch.LongTensor(batch_select_idx)
+        batch_select_proba = torch.tensor(batch_select_proba)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
     def origin_blocking_sent_prediction(self, s_logits, sids, s_masks, topk=3, topk_cdd=20):
@@ -990,62 +779,15 @@ class EVAL_FEATURE(object):
         sids = sids.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
         ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(
-            batch_sents_content, masked_s_logits, n_win=3, k=topk
+            batch_sents_content, masked_s_logits, n_win=3, k=3
         )
-        # pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
-        pred_sids = []
-        for i in range(batch_size):
-            pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(ngram_block_pred_snids[i])))
+        pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
         topk_logits = ngram_block_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(
             batch_sents_content, masked_s_logits, n_win=3, k=topk_cdd
         )
-        # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
-        top_cdd_pred_sids = []
-        for i in range(batch_size):
-            top_cdd_pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(top_cdd_pred_snids[i])))
-        # 3. get the bottom-20 predicted sentences' content and proba
-        reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
-        bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
-        bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
-
-        return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
-
-    def trigram_unigram_blocking_sent_prediction(self, s_logits, sids, s_masks, n_win=3, topk=5, topk_cdd=20):
-        """use trigram blocking and soft unigram feature word blocking
-        :param: s_logits:
-        :param: sids:
-        :param: s_masks:
-        :param: topk:      select the top-k sentence. default: 5
-        :param: topk_cdd:  sanity check. select the top-k candidate sentences, used to tune topk. default: 20
-        """
-        batch_sents_content = []
-        assert sids.size(0) == s_logits.size(0)     # this is the batch_size
-        batch_size = sids.size(0)
-        for i in range(batch_size):
-            cur_sents_content = []
-            for cur_sid in sids[i]:
-                cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
-            batch_sents_content.append(cur_sents_content)
-        masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
-        sids = sids.cpu()
-        # 1. get the top-k predicted sentences which form the hypothesis
-        trigram_feat_block_pred_snids, trigram_feat_block_pred_proba, trigram_feat_block_pred_rank = self.trigram_feat_unigram_blocking(
-            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk, use_feat_freq_in_sent=False
-        )
-        pred_sids = []
-        for i in range(batch_size):
-            pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(trigram_feat_block_pred_snids[i])))
-        topk_logits = trigram_feat_block_pred_proba
-        # 2. get the top-20 predicted sentences' content and proba
-        top_cdd_pred_snids, top_cdd_logits, _ = self.trigram_feat_unigram_blocking(
-            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk_cdd, use_feat_freq_in_sent=False
-        )
-        # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
-        top_cdd_pred_sids = []
-        for i in range(batch_size):
-            top_cdd_pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(top_cdd_pred_snids[i])))
+        top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         # 3. get the bottom-20 predicted sentences' content and proba
         reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
         bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
@@ -1068,129 +810,6 @@ class EVAL_FEATURE(object):
                 f_l.write("%.4f" % logit.item())
                 f_l.write(", ")
             f_l.write("\n")
-
-    def gt_feature_user_item_ratio(self, gt_featureids, user_to_featuretf, item_to_featuretf):
-        """
-        """
-        num_user_side_feature = 0
-        num_item_side_feature = 0
-        num_only_user_side_feature = 0
-        num_only_item_side_feature = 0
-        num_both_user_item_side_feature = 0
-        num_none_user_item_side_feature = 0
-        num_gt_unique_features = len(gt_featureids)
-        assert num_gt_unique_features != 0
-        # TODO: user/item side features are extracted from cdd sentences, not all sentences
-        for fea_id in gt_featureids:
-            if fea_id in user_to_featuretf:
-                num_user_side_feature += 1
-                if fea_id in item_to_featuretf:
-                    # both user and item side and item side
-                    num_both_user_item_side_feature += 1
-                    num_item_side_feature += 1
-                else:
-                    # only user-side
-                    num_only_user_side_feature += 1
-            else:
-                if fea_id in item_to_featuretf:
-                    # only item-side and item-side
-                    num_only_item_side_feature += 1
-                    num_item_side_feature += 1
-                else:
-                    # not user and item side
-                    num_none_user_item_side_feature += 1
-        user_side_ratio = num_user_side_feature / num_gt_unique_features
-        item_side_ratio = num_item_side_feature / num_gt_unique_features
-        only_user_side_ratio = num_only_user_side_feature / num_gt_unique_features
-        only_item_side_ratio = num_only_item_side_feature / num_gt_unique_features
-        both_user_item_ratio = num_both_user_item_side_feature / num_gt_unique_features
-        none_user_item_ratio = num_none_user_item_side_feature / num_gt_unique_features
-
-        return user_side_ratio, item_side_ratio, only_user_side_ratio, only_item_side_ratio, both_user_item_ratio, none_user_item_ratio
-
-    def feat_sent_result_save_file(
-        self, proxy_featureids, gt_featureids, hyps_featureids, top_predict_featureids, user_id, item_id,
-            ref_sents, hyps_sents, proxy_sents, hyps_sents_list, sids_user_item_source, feat_sent_file, s_top_logits):
-        """ This is used to save information to generate the html file to visualize the result
-        :param: proxy_featureids: proxy's featureids, list
-        :param: gt_featureids: ground-truth's featureids, list
-        :param: hyps_featureids: hypothesis/predict sentences' featureids, list
-        :param: top_predict_featureids: top predicted featureids, list
-        :param: user_id: true user id, str
-        :param: item_id: true item id, str
-        :param: ref_sents: reference sentences (text, not id), str
-        :param: hyps_sents: hypothesis/predicted sentences (text, not id), str
-        :param: proxy_sents: proxy sentences (text, not id), str
-        :param: hyps_sents_list: hypothesis/predicted sentences (text, not id) split into sentences, list
-        :param: sids_user_item_source: sid's source, i.e. user-side or item-side sentence, list
-        :param: feat_sent_file: the output json file, result should be written line-by-line, str
-        :param: s_top_logits: the logits of the top-select sentences, tensor
-        """
-
-        proxy_featureids_set = set(proxy_featureids)
-        gt_featureids_set = set(gt_featureids)
-        hyps_featureids_set = set(hyps_featureids)
-        if top_predict_featureids is not None:
-            top_predict_featureids_set = set(top_predict_featureids)
-            assert len(top_predict_featureids_set) == len(top_predict_featureids)
-        else:
-            top_predict_featureids_set = None
-        proxy_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in proxy_featureids_set]
-        gt_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in gt_featureids_set]
-        hyps_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in hyps_featureids_set]
-        if top_predict_featureids is not None:
-            top_predict_featurewords = [self.d_id2feature[this_fea_id] for this_fea_id in top_predict_featureids]
-        else:
-            top_predict_featurewords = None
-
-        # Compare with the gt features
-        overlap_featureids_set_sent = gt_featureids_set.intersection(hyps_featureids_set)
-        overlap_featureids_set_pred = gt_featureids_set.intersection(top_predict_featureids_set)
-        overlap_featureids_set_proxy = gt_featureids_set.intersection(proxy_featureids_set)
-
-        # Convert overlap featureid to feature words
-        if overlap_featureids_set_sent is not None:
-            overlap_featurewords_sent = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set_sent]
-        else:
-            overlap_featurewords_sent = []
-        if overlap_featureids_set_pred is not None:
-            overlap_featurewords_pred = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set_pred]
-        else:
-            overlap_featurewords_pred = []
-        if overlap_featureids_set_proxy is not None:
-            overlap_featurewords_proxy = [self.d_id2feature[this_fea_id] for this_fea_id in overlap_featureids_set_proxy]
-        else:
-            overlap_featurewords_proxy = []
-
-        # Combine sentence with its logits score and source (i.e. user/item side)
-        hyps_sents_with_info = []
-        for i in range(len(hyps_sents_list)):
-            hyps_sent_logits = s_top_logits[i].item()
-            hyps_sent_source = sids_user_item_source[i]
-            hyps_sent_info = "({:.4}, {})".format(hyps_sent_logits, hyps_sent_source)
-            hyps_sents_with_info.append(hyps_sents_list[i]+" "+hyps_sent_info)
-
-        # TODO: Combine features with its logits score and popularity
-
-        # Write result to file
-        with open(feat_sent_file, 'a') as f_feat_sent_json:
-            feat_sent_json_data = {
-                'user': user_id,
-                'item': item_id,
-                'refs': ref_sents,
-                'hyps': hyps_sents,
-                'proxy': proxy_sents,
-                'hyps_info': " ".join(hyps_sents_with_info),
-                'gt_feat_words': gt_featurewords,
-                'hyps_feat_words': hyps_featurewords,
-                'top_pred_feat_words': top_predict_featurewords,
-                'proxy_feat_words': proxy_featurewords,
-                'overlap_feat_gt_hyps': overlap_featurewords_sent,
-                'overlap_feat_gt_pred': overlap_featurewords_pred,
-                'overlap_feat_gt_proxy': overlap_featurewords_proxy
-            }
-            json.dump(feat_sent_json_data, f_feat_sent_json)
-            f_feat_sent_json.write('\n')
 
     def features_result_save_file(
         self, proxy_featureids, gt_featureids, hyps_featureids, popular_featureids, top_predict_featureids,
