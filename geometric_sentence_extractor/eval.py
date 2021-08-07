@@ -20,7 +20,7 @@ from nltk.translate import bleu_score
 import pickle
 import random
 
-dataset_name = 'medium_500_pure'
+# dataset_name = 'medium_500_pure'
 label_format = 'soft_label'
 # methods to select predicted sentence
 use_blocking = False        # whether using 3-gram blocking or not
@@ -81,10 +81,13 @@ class EVAL(object):
         self.m_model_path = args.model_path
         self.m_model_file = args.model_file
         self.m_eval_output_path = args.eval_output_path
+        self.m_data_dir = args.data_dir
+        self.m_dataset_name = args.data_dir.split('/')[-2]
         self.select_s_topk = args.select_topk_s
 
+        print("Data directory: {}".format(self.m_data_dir))
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
-        print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
+        print("Dataset: {0} \t Label: {1}".format(self.m_dataset_name, label_format))
         if use_blocking:
             print("Using trigram blocking.")
         elif use_filtering:
@@ -105,23 +108,23 @@ class EVAL(object):
             print("hypothesis selected based on original score and filtering methods.")
 
         # need to load some mappings
-        id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
-        feature2id_file = '../../Dataset/ratebeer/{}/train/feature/feature2id.json'.format(dataset_name)
-        trainset_id2sent_file = '../../Dataset/ratebeer/{}/train/sentence/id2sentence.json'.format(dataset_name)
-        testset_id2sent_file = '../../Dataset/ratebeer/{}/test/sentence/id2sentence.json'.format(dataset_name)
-        # testset_sentid2feature_file = '../../Dataset/ratebeer/{}/valid/sentence/sentence2feature.json'.format(dataset_name)
-        # trainset_useritem_pair_file = '../../Dataset/ratebeer/{}/train/useritem_pairs.json'.format(dataset_name)
-        testset_useritem_cdd_withproxy_file = '../../Dataset/ratebeer/{}/test/useritem2sentids_withproxy.json'.format(dataset_name)
-        trainset_user2featuretf_file = '../../Dataset/ratebeer/{}/train/user/user2featuretf.json'.format(dataset_name)
-        trainset_item2featuretf_file = '../../Dataset/ratebeer/{}/train/item/item2featuretf.json'.format(dataset_name)
-        trainset_sentid2featuretf_file = '../../Dataset/ratebeer/{}/train/sentence/sentence2featuretf.json'.format(dataset_name)
-        testset_sentid2featuretf_file = '../../Dataset/ratebeer/{}/test/sentence/sentence2featuretf.json'.format(dataset_name)
-        trainset_user2sentid_file = '../../Dataset/ratebeer/{}/train/user/user2sentids.json'.format(dataset_name)
-        trainset_item2sentid_file = '../../Dataset/ratebeer/{}/train/item/item2sentids.json'.format(dataset_name)
-        trainset_sentid2featuretfidf_file = '../../Dataset/ratebeer/{}/train/sentence/sentence2feature.json'.format(dataset_name)
+        id2feature_file = os.path.join(self.m_data_dir, 'train/feature/id2feature.json')
+        feature2id_file = os.path.join(self.m_data_dir, 'train/feature/feature2id.json')
+        trainset_id2sent_file = os.path.join(self.m_data_dir, 'train/sentence/id2sentence.json')
+        testset_id2sent_file = os.path.join(self.m_data_dir, 'test/sentence/id2sentence.json')
+        # testset_sentid2feature_file = os.path.join(self.m_data_dir, 'valid/sentence/sentence2feature.json')
+        # trainset_useritem_pair_file = os.path.join(self.m_data_dir, 'train/useritem_pairs.json')
+        testset_useritem_cdd_withproxy_file = os.path.join(self.m_data_dir, 'test/useritem2sentids_withproxy.json')
+        trainset_user2featuretf_file = os.path.join(self.m_data_dir, 'train/user/user2featuretf.json')
+        trainset_item2featuretf_file = os.path.join(self.m_data_dir, 'train/item/item2featuretf.json')
+        trainset_sentid2featuretf_file = os.path.join(self.m_data_dir, 'train/sentence/sentence2featuretf.json')
+        testset_sentid2featuretf_file = os.path.join(self.m_data_dir, 'test/sentence/sentence2featuretf.json')
+        trainset_user2sentid_file = os.path.join(self.m_data_dir, 'train/user/user2sentids.json')
+        trainset_item2sentid_file = os.path.join(self.m_data_dir, 'train/item/item2sentids.json')
+        trainset_sentid2featuretfidf_file = os.path.join(self.m_data_dir, 'train/sentence/sentence2feature.json')
         # Load the combined train/test set
-        trainset_combined_file = '../../Dataset/ratebeer/{}/train_combined.json'.format(dataset_name)
-        testset_combined_file = '../../Dataset/ratebeer/{}/test_combined.json'.format(dataset_name)
+        trainset_combined_file = os.path.join(self.m_data_dir, 'train_combined.json')
+        testset_combined_file = os.path.join(self.m_data_dir, 'test_combined.json')
         with open(id2feature_file, 'r') as f:
             print("Load file: {}".format(id2feature_file))
             self.d_id2feature = json.load(f)
@@ -209,7 +212,7 @@ class EVAL(object):
 
         # save sid2words mapping
         if save_predict:
-            self.this_DIR = '../data_postprocess/{}'.format(dataset_name)
+            self.this_DIR = '../data_postprocess/{}'.format(self.m_dataset_name)
             if not os.path.isdir(self.this_DIR):
                 os.makedirs(self.this_DIR)
                 print("create folder: {}".format(self.this_DIR))
@@ -336,15 +339,15 @@ class EVAL(object):
         labels_feature_text = [self.d_id2feature[labels_feature[i]] for i in range(feature_num)]
 
         # dump the label (item/feature) into file
-        with open('../embeddings/item_labels_{}.pkl'.format(dataset_name), 'wb') as f:
+        with open('../embeddings/item_labels_{}.pkl'.format(self.m_dataset_name), 'wb') as f:
             pickle.dump(labels_item, f)
-        with open('../embeddings/feature_labels_{}.pkl'.format(dataset_name), 'wb') as f:
+        with open('../embeddings/feature_labels_{}.pkl'.format(self.m_dataset_name), 'wb') as f:
             pickle.dump(labels_feature_text, f)
         # save item/feature embeddings into file
-        with open('../embeddings/item_embs_{}.npy'.format(dataset_name), 'wb') as f:
+        with open('../embeddings/item_embs_{}.npy'.format(self.m_dataset_name), 'wb') as f:
             np.save(f, embeds_item)
         print("Item embeddings saved!")
-        with open('../embeddings/feature_embs_{}.npy'.format(dataset_name), 'wb') as f:
+        with open('../embeddings/feature_embs_{}.npy'.format(self.m_dataset_name), 'wb') as f:
             np.save(f, embeds_feature)
         print("Feature embeddings saved!")
 
@@ -857,7 +860,8 @@ class EVAL(object):
             print("bleu-3:%.4f" % (self.m_mean_eval_bleu_3))
             print("bleu-4:%.4f" % (self.m_mean_eval_bleu_4))
 
-            metric_log_file = os.path.join(self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(dataset_name, label_format))
+            metric_log_file = os.path.join(
+                self.m_eval_output_path, 'eval_metrics_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
             with open(metric_log_file, 'w') as f:
                 print("rouge-1:|f:%.4f |p:%.4f |r:%.4f, rouge-2:|f:%.4f |p:%.4f |r:%.4f, rouge-l:|f:%.4f |p:%.4f |r:%.4f \n" % (
                     self.m_mean_eval_rouge_1_f,
@@ -1211,7 +1215,8 @@ class EVAL(object):
 
     def save_predict_sentences(self, true_userid, true_itemid, refs_sent, hyps_sent, topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids, s_topk_candidate=20):
         # top-predicted/selected sentences
-        predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_{0}_{1}.txt'.format(dataset_name, label_format))
+        predict_log_file = os.path.join(
+            self.m_eval_output_path, 'eval_logging_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
         with open(predict_log_file, 'a') as f:
             f.write("user id: {}\n".format(true_userid))
             f.write("item id: {}\n".format(true_itemid))
@@ -1228,7 +1233,8 @@ class EVAL(object):
         top_cdd_probs_j = top_cdd_logits
         for sid_k in top_cdd_pred_sids:
             top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-        top_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_top_{0}_{1}.txt'.format(dataset_name, label_format))
+        top_predict_log_file = os.path.join(
+            self.m_eval_output_path, 'eval_logging_top_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
         with open(top_predict_log_file, 'a') as f:
             f.write("user id: {}\n".format(true_userid))
             f.write("item id: {}\n".format(true_itemid))
@@ -1246,7 +1252,8 @@ class EVAL(object):
         bottom_cdd_probs_j = 1-bottom_cdd_logits
         for sid_k in bottom_cdd_pred_sids:
             bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-        bottom_predict_log_file = os.path.join(self.m_eval_output_path, 'eval_logging_bottom_{0}_{1}.txt'.format(dataset_name, label_format))
+        bottom_predict_log_file = os.path.join(
+            self.m_eval_output_path, 'eval_logging_bottom_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
         with open(bottom_predict_log_file, 'a') as f:
             f.write("user id: {}\n".format(true_userid))
             f.write("item id: {}\n".format(true_itemid))

@@ -36,7 +36,7 @@ class TRAINER(object):
         self.m_mean_eval_recall = 0
 
         self.m_mean_eval_bleu = 0
-        
+
         self.m_epochs = args.epoch_num
         self.m_batch_size = args.batch_size
 

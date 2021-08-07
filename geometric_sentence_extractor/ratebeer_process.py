@@ -137,8 +137,10 @@ class Vocab():
     
     def f_load_sent_embed(self, sent_embed_file):
         ### sid 2 embed
+        # sentid to sid mapping
         sent2sid_dict = self.m_sent2sid
-
+        # get the pre-trained sentence embedding
+        # format: {sentid: sentembed(768-dim list)}
         sent_embed = readJson(sent_embed_file)
         sent_embed_num = len(sent_embed)
         print("sent num", sent_embed_num)
@@ -153,7 +155,7 @@ class Vocab():
             if sentid_i not in sent2sid_dict:
                 print("error missing sent", sentid_i)
                 continue
-            
+            # convert sentid to sid
             sid_i = sent2sid_dict[sentid_i]
             if sid_i not in self.m_sid2sembed:
                 self.m_sid2sembed[sid_i] = sentembed_i
