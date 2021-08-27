@@ -18,6 +18,7 @@ from model import GraphX
 from eval import EVAL
 from eval_feature import EVAL_FEATURE
 from eval_embed import EVAL_EMBED
+from eval_ILP import EVAL_ILP
 
 
 def set_seed(seed):
@@ -50,6 +51,11 @@ def main(args):
         # train_data, valid_data, vocab_obj = data_obj.f_load_ratebeer(args)
     elif "yelp" in args.data_name:
         train_data, valid_data, vocab_obj = data_obj.f_load_graph_ratebeer(args)
+    elif "tripadvisor" in args.data_name:
+        train_data, valid_data, vocab_obj = data_obj.f_load_graph_ratebeer(args)
+    else:
+        print("unable to load {} dataset's saved graphs.\nExit...".format(args.data_name))
+        exit()
 
     e_time = datetime.now()
     print("... save data duration ... ", e_time-s_time)
@@ -104,6 +110,13 @@ def main(args):
         elif args.eval_embed:
             print("Start feature & sentence embedding evaluation ...")
             eval_obj = EVAL_EMBED(vocab_obj, args, device)
+            network = network.to(device)
+            eval_obj.f_init_eval(network, args.model_file, reload_model=True)
+            eval_obj.f_eval(train_data, valid_data)
+
+        elif args.eval_ILP:
+            print("Start ILP post-processing evaluation ...")
+            eval_obj = EVAL_ILP(vocab_obj, args, device)
             network = network.to(device)
             eval_obj.f_init_eval(network, args.model_file, reload_model=True)
             eval_obj.f_eval(train_data, valid_data)
@@ -175,6 +188,7 @@ if __name__ == "__main__":
     parser.add_argument('--eval', action='store_true', default=False)
     parser.add_argument('--eval_feature', action='store_true', default=False)
     parser.add_argument('--eval_embed', action='store_true', default=False)
+    parser.add_argument('--eval_ILP', action='store_true', default=False)
     parser.add_argument('--parallel', action="store_true", default=False)
     parser.add_argument('--local_rank', type=int, default=0)
 

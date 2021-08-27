@@ -1,32 +1,41 @@
-import numpy as np
-from numpy.core.numeric import indices
-import torch
-from nltk.translate.bleu_score import sentence_bleu
 import os
-# from sklearn.manifold import TSNE
-# import matplotlib.pyplot as plt
-# %matplotlib inline
 import json
-from sklearn.manifold import TSNE
-import matplotlib.pyplot as plt
+import pickle
+import random
+import datetime
+import statistics
+import time
+
+# scientific and machine learning toolkits
+import numpy as np
+import scipy.sparse as sp
+from sklearn.metrics.pairwise import cosine_similarity
+import torch
 from torch import nonzero
 import torch.nn.functional as F
 import torch.nn as nn
-import datetime
-import statistics
-from metric import get_example_recall_precision, compute_bleu, get_bleu, get_feature_recall_precision, get_recall_precision_f1, get_sentence_bleu, get_recall_precision_f1_random
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+# %matplotlib inline
+
+# NLP metrics and Feature Prediction metrics
 from rouge import Rouge
 from nltk.translate import bleu_score
-import pickle
-import random
+from metric import compute_bleu, get_bleu, get_sentence_bleu
+from metric import get_example_recall_precision, get_feature_recall_precision, get_recall_precision_f1, get_recall_precision_f1_random
 
-# dataset_name = 'medium_500_pure'
+# ILP, we use Gurobi
+import gurobipy as gp
+from gurobipy import GRB
+
+
 label_format = 'soft_label'
 # methods to select predicted sentence
-use_blocking = False        # whether using 3-gram blocking or not
-use_filtering = False       # whether using bleu score based filtering or not
-use_trigram_feat_unigram_blocking = True
-random_sampling = False
+use_trigram_blocking = False                    # using 3gram blocking
+use_bleu_filtering = False                      # using bleu score based filtering
+use_trigram_feat_unigram_blocking = False       # using 3gram + feature unigram blocking
+use_ILP = True                                  # using ILP to select sentences
+random_sampling = False                         # using random sampling to select sents
 bleu_filter_value = 0.25
 
 save_predict = False
@@ -35,7 +44,7 @@ save_sentence_selected = False
 save_feature_selected = False
 random_features = False
 
-# Baselines
+# Baselines. Methods to compute some heuristic sentence scores.
 use_majority_vote_popularity = False
 use_majority_vote_popularity_itemside = False
 use_majority_vote_feature_score = False
@@ -43,16 +52,17 @@ use_majority_vote_feature_score = False
 save_hyps_refs = True
 compute_rouge_score = True
 compute_bleu_score = True
+
 # Save feature hidden embeddings (after forward through the GAT model)
 save_train_feature_hidden = False
 save_test_feature_hidden = False
 percentage_train_data_saved = 0.1
 
-MAX_batch_output = 5000
-# S_TOPK = 5
+MAX_batch_output = 2000
+ILP_top_relevance_score_thres = 20
 
 
-class EVAL(object):
+class EVAL_ILP(object):
     def __init__(self, vocab_obj, args, device):
         super().__init__()
 
@@ -82,22 +92,56 @@ class EVAL(object):
         self.m_model_file = args.model_file
         self.m_eval_output_path = args.eval_output_path
         self.m_data_dir = args.data_dir
-        self.m_dataset_name = args.data_dir.split('/')[-2]
+        self.m_dataset = args.data_set
+        self.m_dataset_name = args.data_name
         self.select_s_topk = args.select_topk_s
 
         print("Data directory: {}".format(self.m_data_dir))
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
-        print("Dataset: {0} \t Label: {1}".format(self.m_dataset_name, label_format))
-        if use_blocking:
-            print("Using trigram blocking.")
-        elif use_filtering:
-            print("Using bleu-based filtering.")
-        elif use_trigram_feat_unigram_blocking:
-            print("Using trigram blocking + feature unigram blocking.")
-        elif random_sampling:
-            print("Random sampling.")
+        print("Dataset: {0} \t Label: {1}".format(self.m_dataset, label_format))
+        # Post-processing methods
+        if save_predict:
+            print("--"*10+"save model's predictions."+"--"*10)
+            # save sid2words and sid2sentid mapping
+            self.model_pred_DIR = '../data_postprocess/{}'.format(self.m_dataset)
+            print("Prediction files are saved under the directory: {}".format(self.model_pred_DIR))
+            self.model_pred_file = os.path.join(self.model_pred_DIR, 'model_pred_multiline.json')
+            if not os.path.isdir(self.model_pred_DIR):
+                os.makedirs(self.model_pred_DIR)
+                print("create folder: {}".format(self.model_pred_DIR))
+            else:
+                print("{} folder already exists.".format(self.model_pred_DIR))
+            sid2swords_file = os.path.join(self.model_pred_DIR, 'sid2swords.pickle')
+            sid2sentid_file = os.path.join(self.model_pred_DIR, 'sid2sentid.pickle')
+            with open(sid2swords_file, 'wb') as handle:
+                print("Write file: {}".format(sid2swords_file))
+                pickle.dump(self.m_sid2swords, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open(sid2sentid_file, 'wb') as handle:
+                print("Write file: {}".format(sid2sentid_file))
+                pickle.dump(self.m_sid2sentid, handle, protocol=pickle.HIGHEST_PROTOCOL)
         else:
-            print("Use the original scores.")
+            print("--"*10+"post-processing method"+"--"*10)
+            if use_trigram_blocking:
+                print("Using trigram blocking.")
+            elif use_bleu_filtering:
+                print("Using bleu-based filtering.")
+            elif use_trigram_feat_unigram_blocking:
+                print("Using trigram blocking + feature unigram blocking.")
+            elif random_sampling:
+                print("Random sampling.")
+            elif use_ILP:
+                print("Using ILP for post-processing.")
+            else:
+                print("Use the original scores.")
+        # Pool size
+        if ILP_top_relevance_score_thres is not None:
+            print("Only use the top {} predicted sentences for each user-item pair.".format(
+                ILP_top_relevance_score_thres
+            ))
+        else:
+            print("Use all cdd sentences for each user-item pair.")
+        # Baselines
+        print("--"*10+"sentence predict score"+"--"*10)
         if use_majority_vote_popularity:
             print("hypothesis selected based on feature popularity.")
         elif use_majority_vote_feature_score:
@@ -106,14 +150,12 @@ class EVAL(object):
             print("hypothesis selected based on ITEM side feature popularity.")
         else:
             print("hypothesis selected based on original score and filtering methods.")
-
         # need to load some mappings
+        print("--"*10+"load preliminary mappings"+"--"*10)
         id2feature_file = os.path.join(self.m_data_dir, 'train/feature/id2feature.json')
         feature2id_file = os.path.join(self.m_data_dir, 'train/feature/feature2id.json')
         trainset_id2sent_file = os.path.join(self.m_data_dir, 'train/sentence/id2sentence.json')
         testset_id2sent_file = os.path.join(self.m_data_dir, 'test/sentence/id2sentence.json')
-        # testset_sentid2feature_file = os.path.join(self.m_data_dir, 'valid/sentence/sentence2feature.json')
-        # trainset_useritem_pair_file = os.path.join(self.m_data_dir, 'train/useritem_pairs.json')
         testset_useritem_cdd_withproxy_file = os.path.join(self.m_data_dir, 'test/useritem2sentids_withproxy.json')
         trainset_user2featuretf_file = os.path.join(self.m_data_dir, 'train/user/user2featuretf.json')
         trainset_item2featuretf_file = os.path.join(self.m_data_dir, 'train/item/item2featuretf.json')
@@ -122,6 +164,7 @@ class EVAL(object):
         trainset_user2sentid_file = os.path.join(self.m_data_dir, 'train/user/user2sentids.json')
         trainset_item2sentid_file = os.path.join(self.m_data_dir, 'train/item/item2sentids.json')
         trainset_sentid2featuretfidf_file = os.path.join(self.m_data_dir, 'train/sentence/sentence2feature.json')
+        trainset_senttfidf_embed_file = os.path.join(self.m_data_dir, 'train/sentence/tfidf_sparse.npz')
         # Load the combined train/test set
         trainset_combined_file = os.path.join(self.m_data_dir, 'train_combined.json')
         testset_combined_file = os.path.join(self.m_data_dir, 'test_combined.json')
@@ -137,12 +180,6 @@ class EVAL(object):
         with open(testset_id2sent_file, 'r') as f:
             print("Load file: {}".format(testset_id2sent_file))
             self.d_testset_id2sent = json.load(f)
-        # with open(testset_sentid2feature_file, 'r') as f:
-        #     print("Load file: {}".format(testset_sentid2feature_file))
-        #     self.d_testsetsentid2feature = json.load(f)
-        # with open(trainset_useritem_pair_file, 'r') as f:
-        #     print("Load file: {}".format(trainset_useritem_pair_file))
-        #     self.d_trainset_useritempair = json.load(f)
         with open(testset_useritem_cdd_withproxy_file, 'r') as f:
             print("Load file: {}".format(testset_useritem_cdd_withproxy_file))
             self.d_testset_useritem_cdd_withproxy = json.load(f)
@@ -174,6 +211,9 @@ class EVAL(object):
         with open(trainset_sentid2featuretfidf_file, 'r') as f:
             print("Load file: {}".format(trainset_sentid2featuretfidf_file))
             self.d_trainset_sentid2featuretfidf = json.load(f)
+        # NOTE: Load the sentence tf-idf sparse matrix
+        print("Load file: {}".format(trainset_senttfidf_embed_file))
+        self.train_sent_tfidf_sparse = sp.load_npz(trainset_senttfidf_embed_file)
         # Get trainset sid2featuretf dict
         # Load train/test combined review for standard evaluation
         self.d_trainset_combined = dict()
@@ -210,18 +250,6 @@ class EVAL(object):
         self.d_trainset_sid2feature = self.get_sid2feature_train(
             self.d_trainset_sentid2featuretfidf, self.m_sent2sid)
 
-        # save sid2words mapping
-        if save_predict:
-            self.this_DIR = '../data_postprocess/{}'.format(self.m_dataset_name)
-            if not os.path.isdir(self.this_DIR):
-                os.makedirs(self.this_DIR)
-                print("create folder: {}".format(self.this_DIR))
-            else:
-                print("{} folder already exists.".format(self.this_DIR))
-            this_mapping_file = os.path.join(self.this_DIR, 'sid2swords.pickle')
-            with open(this_mapping_file, 'wb') as handle:
-                pickle.dump(self.m_sid2swords, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
             print("reload model")
@@ -236,137 +264,10 @@ class EVAL(object):
 
     def f_eval(self, train_data, eval_data):
         print("eval new")
-        # self.f_cluster_embedding()
         self.f_eval_new(train_data, eval_data)
 
-    def f_get_statistics(self, train_data, eval_data):
-        f_num = []
-        s_num = []
-        g_num = 0
-        node_num = []
-
-        # for graph_batch in eval_data:
-        #     batch_size = graph_batch.num_graphs
-        #     g_num += batch_size
-        #     for j in range(batch_size):
-        #         g = graph_batch[j]
-        #         f_num.append(g.f_num)
-        #         s_num.append(g.s_num)
-        #         node_num.append(g.num_nodes)
-
-        # print("test data graph num", g_num)
-        # print("test data graph node num", np.mean(node_num))
-        # print("test data feature node num", np.mean(f_num))
-        # print("test data sentence node num", np.mean(s_num))
-
-        f_num = []
-        s_num = []
-        node_num = 0
-        g_num = 0
-
-        index = 0
-
-        for graph_batch in train_data:
-            if index % 1e2 == 0:
-                print(index)
-            index += 1
-            batch_size = graph_batch.num_graphs
-            # print("batch_size", batch_size)
-            g_num += batch_size
-            batch_fnum = graph_batch.f_num
-            f_num.extend(list(batch_fnum.cpu().numpy()))
-
-            batch_snum = graph_batch.s_num
-            s_num.extend(list(batch_snum.cpu().numpy()))
-
-            batch_node_num = graph_batch.num_nodes
-            node_num += batch_node_num
-            # print("batch_node_num", batch_node_num)
-            # node_num.extend(list(batch_node_num.cpu().numpy()))
-
-            # for j in range(batch_size):
-                # g = graph_batch[j]
-                # f_num.append(g.f_num)
-                # s_num.append(g.s_num)
-                # node_num.append(g.num_nodes)
-
-        print("train data graph num", g_num)
-        print("train data graph node num", node_num/g_num)
-        # print("train data graph node num", np.mean(node_num))
-        print("train data feature node num", np.mean(f_num))
-        print("train data sentence node num", np.mean(s_num))
-
-    def f_cluster_embedding(self):
-
-        # self.m_iid2item = {self.m_item2iid[k]:k for k in self.m_item2iid}
-
-        # embeds = self.m_network.m_item_embed.weight.data.cpu().numpy()
-        # item_num = len(embeds)
-        # labels = [self.m_iid2item[i] for i in range(item_num)]
-
-        # tsne_model = TSNE(perplexity=40, n_components=2, init='pca', n_iter=2500, random_state=23)
-        # new_values = tsne_model.fit_transform(embeds)
-
-        # x = []
-        # y = []
-        # for value in new_values:
-        #     x.append(value[0])
-        #     y.append(value[1])
-            
-        # plt.figure(figsize=(16, 16)) 
-        # for i in range(len(x)):
-        #     plt.scatter(x[i],y[i])
-        #     plt.annotate(labels[i],
-        #                 xy=(x[i], y[i]),
-        #                 xytext=(5, 2),
-        #                 textcoords='offset points',
-        #                 ha='right',
-        #                 va='bottom')
-        # plt.savefig("item_embed_tsne.png")
-
-        # m_item_embed is a nn.Embedding layer which maps m_item_num to item_embed_size
-        embeds_item = self.m_network.m_item_embed.weight.data.cpu().numpy()
-        embeds_feature = self.m_network.m_feature_embed.weight.data.cpu().numpy()
-
-        print("item embedding shape: {}".format(embeds_item.shape))
-        print("feature embedding shape: {}".format(embeds_feature.shape))
-        item_num = len(embeds_item)
-        feature_num = len(embeds_feature)       # for small dataset, this should be 800
-        # find the true item that correponding to the iid
-        labels_item = [self.m_iid2item[i] for i in range(item_num)]
-        labels_feature = [self.m_fid2feature[i] for i in range(feature_num)]    # this is the featureid
-        # not using feature id, but using true feature
-        labels_feature_text = [self.d_id2feature[labels_feature[i]] for i in range(feature_num)]
-
-        # dump the label (item/feature) into file
-        with open('../embeddings/item_labels_{}.pkl'.format(self.m_dataset_name), 'wb') as f:
-            pickle.dump(labels_item, f)
-        with open('../embeddings/feature_labels_{}.pkl'.format(self.m_dataset_name), 'wb') as f:
-            pickle.dump(labels_feature_text, f)
-        # save item/feature embeddings into file
-        with open('../embeddings/item_embs_{}.npy'.format(self.m_dataset_name), 'wb') as f:
-            np.save(f, embeds_item)
-        print("Item embeddings saved!")
-        with open('../embeddings/feature_embs_{}.npy'.format(self.m_dataset_name), 'wb') as f:
-            np.save(f, embeds_feature)
-        print("Feature embeddings saved!")
-
-        for i in range(item_num):
-            if np.isnan(embeds_item[i]).any():
-                print("item {} has NaN embedding!".format(i))
-
-        for i in range(feature_num):
-            if np.isnan(embeds_feature[i]).any():
-                print("feature {} has NaN embedding!".format(i))
-
-        print("Skip TSNE ... ")
-        # # draw the tsne clustering figure of item/feature embeddings
-        # print("In tsne ... ")
-
-        print("Finish clustering")
-
     def f_eval_new(self, train_data, eval_data):
-        """ TODO:
+        """
         1. Save Predict/Selected sentences and Reference sentences to compute BLEU using the perl script.
         2. Add mojority vote based baselines.
         3. Seperate code chunks into functions.
@@ -394,7 +295,7 @@ class EVAL(object):
 
         # debug_index = 0
         s_topk = self.select_s_topk
-        s_topk_candidate = 3
+        s_topk_candidate = 10
 
         cnt_useritem_pair = 0
         cnt_useritem_batch = 0
@@ -408,7 +309,7 @@ class EVAL(object):
             print("Number of topk selected sentences: {}".format(s_topk))
             # Perform Evaluation on eval_data / train_data
             for graph_batch in eval_data:
-                if cnt_useritem_batch % 100 == 0:
+                if cnt_useritem_batch % 10 == 0:
                     print("... eval ... ", cnt_useritem_batch)
 
                 graph_batch = graph_batch.to(self.m_device)
@@ -417,35 +318,48 @@ class EVAL(object):
                 s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels, hidden_f_batch = self.m_network.eval_forward(graph_batch)
                 batch_size = s_logits.size(0)
 
-                # Save the predict logits and sids
-                # if save_predict:
-                #     userid_batch = graph_batch.u_rawid
-                #     itemid_batch = graph_batch.i_rawid
-                #     for i in range(batch_size):
-                #         current_result_dict = {}
-                #         current_result_dict['user_id'] = userid_batch[i].item()
-                #         current_result_dict['item_id'] = itemid_batch[i].item()
-                #         assert len(s_logits[i]) == len(sids[i])
-                #         assert len(s_logits[i]) == len(s_masks[i])
-                #         triple_data_list = []
-                #         for pos in range(len(s_logits[i])):
-                #             triple_data_list.append(
-                #                 [s_logits[i][pos].item(), sids[i][pos].item(), s_masks[i][pos].item()])
-                #         current_result_dict['predict_data'] = triple_data_list
-                #         current_target_sent_sids = []
-                #         for this_sid in target_sids[i]:
-                #             current_target_sent_sids.append(this_sid.item())
-                #         current_result_dict['target'] = current_target_sent_sids
-
-                #         # save current_result_dict into json file
-                #         model_ckpt_name = self.m_model_file.split('.')[0]
-                #         this_json_file = os.path.join(self.this_DIR, 'result_{}.json'.format(model_ckpt_name))
-                #         with open(this_json_file, 'a') as f:
-                #             json.dump(current_result_dict, f)
-                #             f.write("\n")
-                #     continue
+                # save the predicted scores of the cdd sents for each user-item pair
+                if save_predict:
+                    userid_batch = graph_batch.u_rawid
+                    itemid_batch = graph_batch.i_rawid
+                    for j in range(batch_size):
+                        userid_j = userid_batch[j].item()
+                        itemid_j = itemid_batch[j].item()
+                        # get the true user/item id
+                        true_userid_j = self.m_uid2user[userid_j]
+                        true_itemid_j = self.m_iid2item[itemid_j]
+                        assert s_logits[j].size(0) == sids[j].size(0)
+                        assert s_logits[j].size(0) == s_masks[j].size(0)
+                        num_sents_j = int(sum(s_masks[j]).item())
+                        # get predict sids and relevant logits
+                        cdd_sent_sids_j = []
+                        target_sent_sids_j = []
+                        cdd_sent_sids2logits_j = {}
+                        for ij in range(num_sents_j):
+                            sid_ij = sids[j][ij].item()
+                            assert sid_ij == int(sid_ij)
+                            sid_ij = int(sid_ij)
+                            cdd_sent_sids_j.append(sid_ij)
+                            assert sid_ij not in cdd_sent_sids2logits_j
+                            cdd_sent_sids2logits_j[sid_ij] = s_logits[j][ij].item()
+                        for sid_ij in target_sids[j]:
+                            target_sent_sids_j.append(sid_ij.item())
+                        # get this user-item's predict data
+                        predict_data_j = {
+                            'user': true_userid_j,
+                            'item': true_itemid_j,
+                            'cdd_sids': cdd_sent_sids_j,
+                            'target_sids': target_sent_sids_j,
+                            'cdd_sids2logits': cdd_sent_sids2logits_j
+                        }
+                        with open(self.model_pred_file, 'a') as f:
+                            json.dump(predict_data_j, f)
+                            f.write('\n')
+                    cnt_useritem_batch += 1
+                    continue
 
                 if random_sampling:
+                    # Get uid and iid
                     userid_batch = graph_batch.u_rawid
                     itemid_batch = graph_batch.i_rawid
                     for i in range(batch_size):
@@ -513,28 +427,33 @@ class EVAL(object):
                     cnt_useritem_batch += 1
                     continue
 
-                # elif get_statistics:
-                #     for i in range(batch_size):
-                #         this_g = graph_batch[i]
-                #         labels_feature = this_g.f_label
-                #         print("shape of feature labels: {}".format(labels_feature.shape))
-                #         num_features_per_target_review.append(torch.sum(labels_feature).item())
-                #     continue
-
-                elif use_blocking:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate
+                elif use_trigram_blocking:
+                    s_topk_logits, s_pred_sids, _, _, _, _ = self.trigram_blocking_sent_prediction(
+                        s_logits, sids, s_masks, batch_size, topk=s_topk,
+                        topk_cdd=s_topk_candidate, pool_size=ILP_top_relevance_score_thres
                     )
                 elif use_trigram_feat_unigram_blocking:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_unigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, n_win=3, topk=s_topk, topk_cdd=s_topk_candidate
+                    s_topk_logits, s_pred_sids, _, _, _, _ = self.trigram_unigram_blocking_sent_prediction(
+                        s_logits, sids, s_masks, n_win=3, topk=s_topk,
+                        topk_cdd=s_topk_candidate, pool_size=ILP_top_relevance_score_thres
                     )
-                elif use_filtering:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.bleu_filtering_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate, bleu_bound=bleu_filter_value
+                elif use_bleu_filtering:
+                    s_topk_logits, s_pred_sids, _, _, _, _ = self.bleu_filtering_sent_prediction(
+                        s_logits, sids, s_masks, batch_size, topk=s_topk,
+                        topk_cdd=s_topk_candidate, bleu_bound=bleu_filter_value,
+                        pool_size=ILP_top_relevance_score_thres
                     )
+                elif use_ILP:
+                    s_topk_logits, s_pred_sids = self.ILP_sent_prediction(
+                        s_logits, sids, s_masks, batch_size, topk=s_topk,
+                        alpha=1.0, thres=ILP_top_relevance_score_thres
+                    )
+                    # s_topk_logits, s_pred_sids = self.ILP_quad_sent_prediction(
+                    #     s_logits, sids, s_masks, batch_size, topk=s_topk,
+                    #     alpha=1.0, thres=ILP_top_relevance_score_thres
+                    # )
                 else:
-                    s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.origin_blocking_sent_prediction(
+                    s_topk_logits, s_pred_sids, _, _, _, _ = self.origin_blocking_sent_prediction(
                         s_logits, sids, s_masks, topk=s_topk, topk_cdd=s_topk_candidate
                     )
 
@@ -553,8 +472,8 @@ class EVAL(object):
                 else:
                     # pass or break. pass will continue evaluating full batch testing set, break will only
                     # evaluate the first several batches of the testing set.
-                    pass
-                    # break
+                    # pass
+                    break
 
                 for j in range(batch_size):
                     userid_j = userid[j].item()
@@ -565,92 +484,14 @@ class EVAL(object):
 
                     refs_j_list = []
                     hyps_j_list = []
-                    hyps_featureid_j_list = []
                     for sid_k in target_sids[j]:
                         refs_j_list.append(self.m_sid2swords[sid_k.item()])
 
                     for sid_k in s_pred_sids[j]:
                         hyps_j_list.append(self.m_sid2swords[sid_k.item()])
-                        hyps_featureid_j_list.extend(self.d_trainset_sid2feature[sid_k.item()])
-
-                    hyps_num_unique_features = len(set(hyps_featureid_j_list))
 
                     hyps_j = " ".join(hyps_j_list)
                     refs_j = " ".join(refs_j_list)
-
-                    # proxy_j_list = []
-                    # # get the proxy's sentences' id.
-                    # # NOTE: proxy sentences' id is on the trainset
-                    # for sid_k in self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][-1]:
-                    #     proxy_j_list.append(self.d_trainset_id2sent[sid_k])
-                    # proxy_j = " ".join(proxy_j_list)
-
-                    # add the number of sentences of the gt review
-                    # num_sents_per_target_review.append(len(refs_j_list))
-                    # add the number of sentences of the proxy review
-                    # num_sents_per_proxy_review.append(len(proxy_j_list))
-
-                    # Get the featureid and feature logits
-                    f_logits_j = f_logits[j]
-                    fid_j = fids[j].cpu()
-                    hidden_f_batch_j = hidden_f_batch[j].cpu()
-                    # print("f_logits_j: {}".format(f_logits_j.shape))
-                    # print("fid_j: {}".format(fid_j.shape))
-                    # print("hidden_f_batch_j: {}".format(hidden_f_batch_j.shape))
-                    # mask_f_j = f_masks[j].cpu()
-                    target_f_labels_j = target_f_labels[j].cpu()
-                    # print("target f albels, shape: {}".format(target_f_labels_j.shape))
-                    # print("target f labels: {}".format(target_f_labels_j.squeeze()))
-                    f_num_j = target_f_labels_j.size(0)
-                    mask_f_logits_j = f_logits_j[:f_num_j].cpu()
-                    mask_fid_j = fid_j[:f_num_j]
-                    mask_featureid_j = [self.m_fid2feature[this_f_id.item()] for this_f_id in mask_fid_j]
-                    mask_hidden_f_j = hidden_f_batch_j[:f_num_j]
-                    # print("mask_f_logits: {}".format(mask_f_logits_j.shape))
-                    # print("mask_fid_j: {}".format(mask_fid_j.shape))
-                    # print("mask_hidden_f_j: {}".format(mask_hidden_f_j.shape))
-
-                    if save_train_feature_hidden:
-                        # Only save 10% of the data from train set
-                        if random.random() <= percentage_train_data_saved:
-                            # Form the feature hidden f tensor with label
-                            f_hidden_train_file = os.path.join(self.m_eval_output_path, 'train_f_hidden.json')
-                            with open(f_hidden_train_file, 'a') as f_h:
-                                for f_idx in range(f_num_j):
-                                    cur_dict = dict()
-                                    cur_hidden_f = mask_hidden_f_j[f_idx].detach().numpy()
-                                    cur_f_label = target_f_labels_j[f_idx].detach().numpy()
-                                    cur_hidden_f_data = np.append(cur_hidden_f, cur_f_label)
-                                    cur_hidden_f_data = cur_hidden_f_data.tolist()
-                                    cur_dict['ui_pair_index'] = cnt_useritem_pair
-                                    cur_dict['f_hidden'] = cur_hidden_f_data
-                                    # Save this dict into json file
-                                    json.dump(cur_dict, f_h)
-                                    f_h.write('\n')
-                            train_ui_pair_saved_cnt += 1
-
-                    if save_test_feature_hidden:
-                        # Form the feature hidden f tensor with label
-                        f_hidden_test_file = os.path.join(self.m_eval_output_path, 'test_f_hidden.json')
-                        with open(f_hidden_test_file, 'a') as f_h:
-                            # Need the gt-feature id of this user-item pair
-                            gt_featureid_j, _ = self.get_gt_review_featuretf(
-                                self.d_testset_sid2featuretf, target_sids[j])
-                            cur_test_user_item_f_hidden = dict()
-                            cur_test_user_item_f_hidden['ui_pair_index'] = cnt_useritem_pair
-                            f_hidden_np = []
-                            for f_idx in range(f_num_j):
-                                cur_f_hidden_np = []
-                                cur_f_hidden_np.append(int(mask_featureid_j[f_idx]))
-                                cur_f_hidden_np.extend(mask_hidden_f_j[f_idx].detach().numpy().tolist())
-                                f_hidden_np.append(cur_f_hidden_np)
-                            cur_test_user_item_f_hidden['feature'] = f_hidden_np
-                            cur_test_user_item_f_hidden['gt'] = gt_featureid_j
-                            cur_test_user_item_f_hidden['topk'] = hyps_num_unique_features
-                            # Save this dict into json file
-                            json.dump(cur_test_user_item_f_hidden, f_h)
-                            f_h.write('\n')
-                        test_ui_pair_saved_cnt += 1
 
                     cnt_useritem_pair += 1
 
@@ -661,12 +502,7 @@ class EVAL(object):
                             refs_sent=refs_j,
                             hyps_sent=hyps_j,
                             topk_logits=s_topk_logits[j],
-                            pred_sids=s_pred_sids[j],
-                            top_cdd_logits=s_top_cdd_logits[j],
-                            top_cdd_pred_sids=s_top_cdd_pred_sids[j],
-                            bottom_cdd_logits=s_bottom_cdd_logits[j],
-                            bottom_cdd_pred_sids=s_bottom_cdd_pred_sids[j],
-                            s_topk_candidate=s_topk_candidate
+                            pred_sids=s_pred_sids[j]
                         )
 
                     if save_hyps_refs:
@@ -693,80 +529,17 @@ class EVAL(object):
                             }
                             json.dump(cur_ref_json, f_ref_json)
                             f_ref_json.write("\n")
-                        if use_majority_vote_popularity:
-                            cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                            hyps_pop, _, _, _ = self.majority_vote_popularity(
-                                true_userid_j, true_itemid_j, cur_cdd_sents, topk=s_topk)
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_pop)
-                                f_hyp.write("\n")
-                            with open(hyps_json_file, 'a') as f_hyp_json:
-                                cur_hyp_json = {
-                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_pop
-                                }
-                                json.dump(cur_hyp_json, f_hyp_json)
-                                f_hyp_json.write("\n")
-                        elif use_majority_vote_popularity_itemside:
-                            cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                            # Get item-side feature ids
-                            item_featureids = set(self.d_trainset_item2featuretf[true_itemid_j].keys())
-                            hyps_pop, _, _, _ = self.majority_vote_popularity_itemside(
-                                true_userid_j, true_itemid_j, cur_cdd_sents, item_featureids, topk=s_topk)
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_pop)
-                                f_hyp.write("\n")
-                            with open(hyps_json_file, 'a') as f_hyp_json:
-                                cur_hyp_json = {
-                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_pop
-                                }
-                                json.dump(cur_hyp_json, f_hyp_json)
-                                f_hyp_json.write("\n")
-                        elif use_majority_vote_feature_score:
-                            cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                            hyps_f_score, _, _, _ = self.majority_vote_predicted_feature(
-                                true_userid_j, true_itemid_j, cur_cdd_sents, mask_f_logits_j, mask_featureid_j, topk=s_topk)
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_f_score)
-                                f_hyp.write("\n")
-                            with open(hyps_json_file, 'a') as f_hyp_json:
-                                cur_hyp_json = {
-                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_f_score
-                                }
-                                json.dump(cur_hyp_json, f_hyp_json)
-                                f_hyp_json.write("\n")
-                        else:
-                            with open(hyps_file, 'a') as f_hyp:
-                                f_hyp.write(hyps_j)
-                                f_hyp.write("\n")
-                            with open(hyps_json_file, 'a') as f_hyp_json:
-                                cur_hyp_json = {
-                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_j
-                                }
-                                json.dump(cur_hyp_json, f_hyp_json)
-                                f_hyp_json.write("\n")
-
-                    if use_majority_vote_popularity and not save_hyps_refs:
-                        cur_cdd_sents = self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][0]
-                        hyps_pop, _, topk_cdd_scores, hyps_sent_feature_scores = self.majority_vote_popularity(
-                            true_userid_j, true_itemid_j, cur_cdd_sents, topk=s_topk)
-                        popu_log_file = os.path.join(self.m_eval_output_path, 'popularity_majority_vote.txt')
-                        with open(popu_log_file, 'a') as f_popu:
-                            f_popu.write("User: {0}\tItem: {1}\n".format(true_userid_j, true_itemid_j))
-                            f_popu.write("Refs: {}\n".format(refs_j))
-                            f_popu.write("Hyps: {}\n".format(hyps_pop))
-                            f_popu.write("Hyps sent scores: {}\n".format(topk_cdd_scores.numpy().tolist()))
-                            # write feature weighted scores
-                            for featureid_score_dict in hyps_sent_feature_scores:
-                                featureword_score_dict = dict()
-                                for key, value in featureid_score_dict.items():
-                                    assert isinstance(key, str)
-                                    featureid = key
-                                    featureword = self.d_id2feature[featureid]
-                                    featureword_score_dict[featureword] = value
-                                # write this featureword-score dict into file
-                                f_popu.write(json.dumps(featureword_score_dict))
-                                f_popu.write("\n")
-                            f_popu.write("========================================\n")
+                        # write hypothesis raw text
+                        with open(hyps_file, 'a') as f_hyp:
+                            f_hyp.write(hyps_j)
+                            f_hyp.write("\n")
+                        # write hypothesis raw text with user/item id
+                        with open(hyps_json_file, 'a') as f_hyp_json:
+                            cur_hyp_json = {
+                                'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_j
+                            }
+                            json.dump(cur_hyp_json, f_hyp_json)
+                            f_hyp_json.write("\n")
 
                     if compute_rouge_score:
                         try:
@@ -798,12 +571,13 @@ class EVAL(object):
                         bleu_scores_j = compute_bleu([[refs_j.split()]], [hyps_j.split()])
                         bleu_list.append(bleu_scores_j)
 
-                        bleu_1_scores_j, bleu_2_scores_j, bleu_3_scores_j, bleu_4_scores_j = get_sentence_bleu([refs_j.split()], hyps_j.split())
+                        bleu_1_j, bleu_2_j, bleu_3_j, bleu_4_j = get_sentence_bleu(
+                            [refs_j.split()], hyps_j.split())
 
-                        bleu_1_list.append(bleu_1_scores_j)
-                        bleu_2_list.append(bleu_2_scores_j)
-                        bleu_3_list.append(bleu_3_scores_j)
-                        bleu_4_list.append(bleu_4_scores_j)
+                        bleu_1_list.append(bleu_1_j)
+                        bleu_2_list.append(bleu_2_j)
+                        bleu_3_list.append(bleu_3_j)
+                        bleu_4_list.append(bleu_4_j)
 
                 # exit()
 
@@ -884,7 +658,7 @@ class EVAL(object):
                 #     print("Number of sentences for each target review (on average): {}".format(
                 #         self.m_mean_num_sents_per_target_review), file=f)
 
-    def trigram_feat_unigram_blocking(self, sents, p_sent, n_win=3, topk=5, use_feat_freq_in_sent=False):
+    def trigram_feat_unigram_blocking(self, sents, p_sent, n_win=3, topk=5, use_feat_freq_in_sent=False, pool_size=None):
         """ a combination of trigram blocking and soft feature-unigram blocking
         :param sents:   batch of list of candidate sentence, each candidate sentence is a string.
                         shape: (batch_size, sent_num)
@@ -903,7 +677,7 @@ class EVAL(object):
         feat_overlap_threshold = 1
         # 1. Perform trigram blocking, get the top-100 predicted sentences
         batch_select_idx_trigram, batch_select_proba_trigram, batch_select_rank_trigram = self.ngram_blocking(
-            sents=sents, p_sent=p_sent, n_win=n_win, k=100
+            sents=sents, p_sent=p_sent, n_win=n_win, k=100, use_topk=True, pool_size=pool_size
         )
         # 2. Perform feature-unigram blocking
         for batch_idx in range(batch_size):
@@ -964,12 +738,14 @@ class EVAL(object):
         # batch_select_idx = torch.LongTensor(batch_select_idx)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
-    def ngram_blocking(self, sents, p_sent, n_win, k, use_topk=True):
+    def ngram_blocking(self, sents, p_sent, n_win, k, use_topk=True, pool_size=None):
         """ ngram blocking
-        :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
-        :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
-        :param n_win:   ngram window size, i.e. which n-gram we are using. n_win can be 2,3,4,...
-        :param k:       we are selecting the top-k sentences
+        :param sents:     batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
+        :param p_sent:    torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
+        :param n_win:     ngram window size, i.e. which n-gram we are using. n_win can be 2,3,4,...
+        :param k:         we are selecting the top-k sentences
+        :param use_topk:  whether we select the top-k sentences
+        :param pool_size: the number of the top-N sentences can be selected
 
         :return:        selected index of sids
         """
@@ -988,6 +764,9 @@ class EVAL(object):
             idx_rank = 0
             for idx in sorted_idx:
                 idx_rank += 1
+                if pool_size is not None and idx_rank > pool_size:
+                    # this suggests that we have already searched all the cdd sents from pool
+                    break
                 try:
                     cur_sent = sents[batch_idx][idx]
                 except KeyError:
@@ -1004,7 +783,7 @@ class EVAL(object):
                         cur_sent_ngrams.append(this_ngram)
                 if not overlap_flag:
                     if p_sent[batch_idx][idx] < 0.0:
-                        # this suggest that this idx is already the pad idx
+                        # this suggests that this idx is already the pad idx
                         break
                     select_idx.append(idx)
                     select_proba.append(p_sent[batch_idx][idx])
@@ -1019,12 +798,13 @@ class EVAL(object):
         # batch_select_idx = torch.LongTensor(batch_select_idx)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
-    def bleu_filtering(self, sents, p_sent, k, filter_value=0.25):
+    def bleu_filtering(self, sents, p_sent, k, filter_value=0.25, pool_size=None):
         """ bleu filtering
         :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
         :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
         :param k:       we are selecting the top-k sentences
         :param filter_value: the boundary value of bleu-2 + bleu-3 that defines whether we should filter a sentence
+        :param pool_size: the number of the top-N sentences can be selected
 
         :return:        selected index of sids
         """
@@ -1046,6 +826,8 @@ class EVAL(object):
             idx_rank = 0
             for idx in sorted_idx:
                 idx_rank += 1
+                if pool_size is not None and idx_rank > pool_size:
+                    break
                 try:
                     cur_sent = sents[batch_idx][idx]
                 except KeyError:
@@ -1105,7 +887,241 @@ class EVAL(object):
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def trigram_blocking_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20):
+    def ILP_quad_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, alpha=1.0, thres=None):
+        """
+        :param: s_logits,   sentence's predict scores.        shape: (batch_size, max_sent_num)
+        :param: sids,       sentence's sid.                   shape: (batch_size, max_sent_num)
+        :param: s_masks,    0 for masks. 1 for true sids.     shape: (batch_size, max_sent_num)
+        :param: topk,       number of select sentences.
+        :param: alpha,      trade-off parameter between 2 costs.
+        :param: thres,      only use thres number of top predicted sentences.
+                            None: not use top filtering.
+        :return
+        """
+        masked_s_logits = (s_logits.cpu() + 1.0) * s_masks.cpu() - 1.0
+        ILP_compute_scores = []
+        batch_select_sids = []
+        batch_select_sentids = []
+        batch_select_sent_logits = []
+        # Loop for each user-item pair in this batch
+        for i in range(batch_size):
+            # start_i = time.process_time()
+            # sort the logits and only select topk
+            # sorted_s_logits, sorted_idx = masked_s_logits[i].sort(descending=True)
+            sorted_s_logits, sorted_idx = s_logits[i].sort(descending=True)
+            # Get number of true sids in this user-item pair (w/o pad sids)
+            num_sent_i = int(sum(s_masks[i]).item())
+            cdd_sent_sids = []
+            cdd_sent_sentids = []
+            cdd_sent_sentids_int = []
+            cdd_sent_logits = []
+            if thres is None:
+                for j in range(num_sent_i):
+                    sid_ij = sids[i][j].item()
+                    sentid_ij = self.m_sid2sentid[sid_ij]
+                    sentid_ij_int = int(sentid_ij)
+                    sent_pred_score_ij = s_logits[i][j].item()
+                    cdd_sent_sids.append(sid_ij)
+                    cdd_sent_sentids.append(sentid_ij)
+                    cdd_sent_sentids_int.append(sentid_ij_int)
+                    cdd_sent_logits.append(sent_pred_score_ij)
+            else:
+                for j in sorted_idx:
+                    sid_ij = sids[i][j.item()].item()
+                    sentid_ij = self.m_sid2sentid[sid_ij]
+                    sentid_ij_int = int(sentid_ij)
+                    sent_pred_score_ij = s_logits[i][j.item()].item()
+                    if sent_pred_score_ij <= 0.0:
+                        break
+                    else:
+                        if len(cdd_sent_logits) > 0:
+                            try:
+                                assert cdd_sent_logits[-1] >= sent_pred_score_ij
+                            except:
+                                print(sorted_s_logits[:(len(cdd_sent_logits)+2)].tolist())
+                                print(cdd_sent_logits)
+                                print(sent_pred_score_ij)
+                                torch.save(s_logits, os.path.join(self.m_eval_output_path, 's_logits.pt'))
+                                torch.save(s_masks, os.path.join(self.m_eval_output_path, 's_masks.pt'))
+                                torch.save(masked_s_logits, os.path.join(self.m_eval_output_path, 'masked_s_logits.pt'))
+                                exit()
+                    cdd_sent_sids.append(sid_ij)
+                    cdd_sent_sentids.append(sentid_ij)
+                    cdd_sent_sentids_int.append(sentid_ij_int)
+                    cdd_sent_logits.append(sent_pred_score_ij)
+                    if len(cdd_sent_sids) == thres:
+                        break
+            # Check how many selected cdd sentences after top-truncating
+            try:
+                assert len(cdd_sent_sids) >= topk
+            except AssertionError:
+                topk = len(cdd_sent_sids)
+            # Get the cosine similarity matrix for these cdd sentences
+            cosine_sim_maxtrix = cosine_similarity(self.train_sent_tfidf_sparse[cdd_sent_sentids_int])
+            cosine_sim_upper = np.triu(cosine_sim_maxtrix, 1)
+            cdd_sent_pred_scores = np.array(cdd_sent_logits)
+            # Create a new model for ILP
+            ILP_m = gp.Model("graph2x_ilp")
+            ILP_m.Params.LogToConsole = 0
+            # ILP_m.setParam(GRB.Param.TimeLimit, 1000.0)
+            # Create variables
+            W = ILP_m.addMVar(shape=len(cdd_sent_sids), vtype=GRB.BINARY, name="W")
+            # Construct Objective
+            ILP_m.setObjective(
+                (cdd_sent_pred_scores @ W) - alpha * (W @ cosine_sim_upper @ W),
+                GRB.MAXIMIZE
+            )
+            # Add constrains
+            ones_i = np.ones(len(cdd_sent_sids))
+            ILP_m.addConstr(ones_i @ W == topk, name="c")
+            # Optimize model
+            ILP_m.optimize()
+            # Get the obj value
+            ILP_compute_scores.append(ILP_m.objVal)
+            # Get the variables' value
+            select_sent_idx_i = np.where(W.X == 1.0)[0].tolist()
+            # Get the select sids and sentids
+            select_sids_i = [cdd_sent_sids[idx] for idx in select_sent_idx_i]
+            select_sentids_i = [cdd_sent_sentids[idx] for idx in select_sent_idx_i]
+            select_sent_logits_i = [cdd_sent_logits[idx] for idx in select_sent_idx_i]
+            batch_select_sids.append(torch.LongTensor(select_sids_i))
+            batch_select_sentids.append(select_sentids_i)
+            batch_select_sent_logits.append(torch.tensor(select_sent_logits_i))
+            # Clean up the model
+            ILP_m.dispose()
+            # end_i = time.process_time()
+            # print("{} for 1 user-item review ({} cdd sents)".format(end_i-start_i, num_sent_i))
+
+        return batch_select_sent_logits, batch_select_sids
+
+    def ILP_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, alpha=1.0, thres=None):
+        """
+        :param: s_logits,   sentence's predict scores.        shape: (batch_size, max_sent_num)
+        :param: sids,       sentence's sid.                   shape: (batch_size, max_sent_num)
+        :param: s_masks,    0 for masks. 1 for true sids.     shape: (batch_size, max_sent_num)
+        :param: topk,       number of select sentences.
+        :param: alpha,      trade-off parameter between 2 costs.
+        :param: thres,      only use thres number of top predicted sentences.
+                            None: not use top filtering.
+        :return
+        """
+        ILP_compute_scores = []
+        batch_select_sids = []
+        batch_select_sentids = []
+        batch_select_sent_logits = []
+        # Loop for each user-item pair in this batch
+        for i in range(batch_size):
+            # start_i = time.process_time()
+            # sort the logits and only select topk
+            sorted_s_logits, sorted_idx = s_logits[i].sort(descending=True)
+            # Get number of true sids in this user-item pair (w/o pad sids)
+            num_sent_i = int(sum(s_masks[i]).item())
+            cdd_sent_sids = []
+            cdd_sent_sentids = []
+            cdd_sent_sentids_int = []
+            cdd_sent_logits = []
+            if thres is None:
+                for j in range(num_sent_i):
+                    sid_ij = sids[i][j].item()
+                    sentid_ij = self.m_sid2sentid[sid_ij]
+                    sentid_ij_int = int(sentid_ij)
+                    sent_pred_score_ij = s_logits[i][j].item()
+                    cdd_sent_sids.append(sid_ij)
+                    cdd_sent_sentids.append(sentid_ij)
+                    cdd_sent_sentids_int.append(sentid_ij_int)
+                    cdd_sent_logits.append(sent_pred_score_ij)
+            else:
+                for j in sorted_idx:
+                    sid_ij = sids[i][j.item()].item()
+                    sentid_ij = self.m_sid2sentid[sid_ij]
+                    sentid_ij_int = int(sentid_ij)
+                    sent_pred_score_ij = s_logits[i][j.item()].item()
+                    if sent_pred_score_ij <= 0.0:
+                        break
+                    else:
+                        if len(cdd_sent_logits) > 0:
+                            try:
+                                assert cdd_sent_logits[-1] >= sent_pred_score_ij
+                            except:
+                                exit()
+                    cdd_sent_sids.append(sid_ij)
+                    cdd_sent_sentids.append(sentid_ij)
+                    cdd_sent_sentids_int.append(sentid_ij_int)
+                    cdd_sent_logits.append(sent_pred_score_ij)
+                    if len(cdd_sent_sids) == thres:
+                        break
+            # Check how many selected cdd sentences after top-truncating
+            try:
+                assert len(cdd_sent_sids) >= topk
+            except AssertionError:
+                topk = len(cdd_sent_sids)
+            # Get the cosine similarity matrix for these cdd sentences
+            cosine_sim_maxtrix = cosine_similarity(self.train_sent_tfidf_sparse[cdd_sent_sentids_int])
+            cosine_sim_upper = np.triu(cosine_sim_maxtrix, 1)
+            cdd_sent_pred_scores = np.array(cdd_sent_logits)
+            pool_size = len(cdd_sent_sids)
+            # Create a new model for ILP
+            ILP_m = gp.Model("graph2x_ilp")
+            ILP_m.Params.LogToConsole = 0
+            # ILP_m.setParam(GRB.Param.TimeLimit, 1000.0)
+            # Create variables
+            X = ILP_m.addMVar(shape=pool_size, vtype=GRB.BINARY, name="X")
+            Y = ILP_m.addMVar(shape=(pool_size, pool_size), vtype=GRB.BINARY, name="Y")
+            # Construct Objective
+            ILP_m.setObjective(
+                (cdd_sent_pred_scores @ X) - alpha * sum(
+                    Y[i_m][j_m] * cosine_sim_upper[i_m][j_m] for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)),
+                GRB.MAXIMIZE
+            )
+            # Add the sum constrain of X
+            ones_i = np.ones(len(cdd_sent_sids))
+            ILP_m.addConstr(ones_i @ X == topk, name="c0")
+            # Add the inequality constraints
+            # usage: https://www.gurobi.com/documentation/9.1/refman/py_model_addconstrs.html
+            ILP_m.addConstrs(
+                ((X[i_m] + X[j_m]) <= (Y[i_m][j_m] + 1) for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)), name='c1'
+            )
+            # Add the sum constraint of Y
+            E_num = topk * (topk - 1) / 2
+            ILP_m.addConstr(
+                sum(Y[i_m][j_m] for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)) == E_num, name="c2"
+            )
+            # Optimize model
+            ILP_m.optimize()
+            # Get the obj value
+            ILP_compute_scores.append(ILP_m.objVal)
+            # Get the X variables' value
+            select_sent_idx_i = np.where(X.X == 1.0)[0].tolist()
+            # Check the Y variables value
+            for i_m in range(pool_size):
+                for j_m in range(i_m+1, pool_size):
+                    if X.X[i_m] == 1.0 and X.X[j_m] == 1.0:
+                        assert Y.X[i_m][j_m] == 1.0
+                    else:
+                        assert Y.X[i_m][j_m] == 0.0
+            # Get the select sids and sentids
+            select_sids_i = [cdd_sent_sids[idx] for idx in select_sent_idx_i]
+            select_sentids_i = [cdd_sent_sentids[idx] for idx in select_sent_idx_i]
+            select_sent_logits_i = [cdd_sent_logits[idx] for idx in select_sent_idx_i]
+            batch_select_sids.append(torch.LongTensor(select_sids_i))
+            batch_select_sentids.append(select_sentids_i)
+            batch_select_sent_logits.append(torch.tensor(select_sent_logits_i))
+            # Clean up the model
+            ILP_m.dispose()
+            # end_i = time.process_time()
+            # print("{} for 1 user-item review ({} cdd sents)".format(end_i-start_i, num_sent_i))
+
+        return batch_select_sent_logits, batch_select_sids
+
+    def compute_cosine_sim(self, cdd_sentids):
+        """ Compute pairwise cosine similarity for sentences in cdd_sentids.
+            The result should be a upper triangle matrix (the diagnol is all-zero).
+        """
+        cosine_sim_maxtrix = cosine_similarity(self.train_sent_tfidf_sparse[cdd_sentids])
+        cosine_sim_upper = np.triu(cosine_sim_maxtrix, 1)
+        return cosine_sim_upper
+
+    def trigram_blocking_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20, pool_size=50):
         # use n-gram blocking
         # get all the sentence content
         batch_sents_content = []
@@ -1120,7 +1136,7 @@ class EVAL(object):
         sids = sids.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
         ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(
-            batch_sents_content, masked_s_logits, n_win=3, k=topk
+            batch_sents_content, masked_s_logits, n_win=3, k=topk, use_topk=True, pool_size=pool_size
         )
         # pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
         pred_sids = []
@@ -1129,7 +1145,7 @@ class EVAL(object):
         topk_logits = ngram_block_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(
-            batch_sents_content, masked_s_logits, n_win=3, k=topk_cdd
+            batch_sents_content, masked_s_logits, n_win=3, k=topk_cdd, use_topk=True, pool_size=None
         )
         # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         top_cdd_pred_sids = []
@@ -1142,7 +1158,7 @@ class EVAL(object):
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def trigram_unigram_blocking_sent_prediction(self, s_logits, sids, s_masks, n_win=3, topk=5, topk_cdd=20):
+    def trigram_unigram_blocking_sent_prediction(self, s_logits, sids, s_masks, n_win=3, topk=5, topk_cdd=20, pool_size=50):
         """use trigram blocking and soft unigram feature word blocking
         :param: s_logits:
         :param: sids:
@@ -1162,7 +1178,7 @@ class EVAL(object):
         sids = sids.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
         trigram_feat_block_pred_snids, trigram_feat_block_pred_proba, trigram_feat_block_pred_rank = self.trigram_feat_unigram_blocking(
-            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk, use_feat_freq_in_sent=False
+            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk, use_feat_freq_in_sent=False, pool_size=pool_size
         )
         pred_sids = []
         for i in range(batch_size):
@@ -1170,7 +1186,7 @@ class EVAL(object):
         topk_logits = trigram_feat_block_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.trigram_feat_unigram_blocking(
-            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk_cdd, use_feat_freq_in_sent=False
+            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk_cdd, use_feat_freq_in_sent=False, pool_size=None
         )
         # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         top_cdd_pred_sids = []
@@ -1183,7 +1199,7 @@ class EVAL(object):
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def bleu_filtering_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20, bleu_bound=0.25):
+    def bleu_filtering_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20, bleu_bound=0.25, pool_size=50):
         # use bleu-based filtering
         # get all the sentence content
         batch_sents_content = []
@@ -1199,12 +1215,14 @@ class EVAL(object):
         masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
         # 1. get the top-k predicted sentences which form the hypothesis
         bleu_filter_pred_snids, bleu_filter_pred_proba, bleu_filter_pred_rank = self.bleu_filtering(
-            batch_sents_content, masked_s_logits, k=topk, filter_value=bleu_bound)
+            batch_sents_content, masked_s_logits, k=topk, filter_value=bleu_bound, pool_size=pool_size
+        )
         pred_sids = sids.gather(dim=1, index=bleu_filter_pred_snids)
         topk_logits = bleu_filter_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(
-            batch_sents_content, masked_s_logits, k=topk_cdd, filter_value=bleu_bound)
+            batch_sents_content, masked_s_logits, k=topk_cdd, filter_value=bleu_bound, pool_size=pool_size
+        )
         top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         # 3. get the bottom-20 predicted sentences' content and proba
         reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
@@ -1213,7 +1231,7 @@ class EVAL(object):
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def save_predict_sentences(self, true_userid, true_itemid, refs_sent, hyps_sent, topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids, s_topk_candidate=20):
+    def save_predict_sentences(self, true_userid, true_itemid, refs_sent, hyps_sent, topk_logits, pred_sids):
         # top-predicted/selected sentences
         predict_log_file = os.path.join(
             self.m_eval_output_path, 'eval_logging_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
@@ -1223,47 +1241,10 @@ class EVAL(object):
             f.write("hyps: {}\n".format(hyps_sent))
             f.write("refs: {}\n".format(refs_sent))
             f.write("probas: {}\n".format(topk_logits))
-            # if use_blocking:
+            # if use_trigram_blocking:
             #     f.write("rank: {}\n".format(ngram_block_pred_rank[j]))
-            # elif use_filtering:
+            # elif use_bleu_filtering:
             #     f.write("rank: {}\n".format(bleu_filter_pred_rank[j]))
-            f.write("========================================\n")
-        # top-ranked sentences
-        top_cdd_hyps_j = []
-        top_cdd_probs_j = top_cdd_logits
-        for sid_k in top_cdd_pred_sids:
-            top_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-        top_predict_log_file = os.path.join(
-            self.m_eval_output_path, 'eval_logging_top_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
-        with open(top_predict_log_file, 'a') as f:
-            f.write("user id: {}\n".format(true_userid))
-            f.write("item id: {}\n".format(true_itemid))
-            f.write("refs: {}\n".format(refs_sent))
-            for k in range(s_topk_candidate):
-                # key is the sentence content
-                # value is the probability of this sentence
-                f.write("candidate sentence: {}\n".format(top_cdd_hyps_j[k]))
-                f.write("prob: {}\n".format(top_cdd_probs_j[k].item()))
-                # also retrieve the feature of this sentence
-                f.write("----:----:----:----:----:----:----:----:\n")
-            f.write("========================================\n")
-        # bottom-ranked sentences
-        bottom_cdd_hyps_j = []
-        bottom_cdd_probs_j = 1-bottom_cdd_logits
-        for sid_k in bottom_cdd_pred_sids:
-            bottom_cdd_hyps_j.append(self.m_sid2swords[sid_k.item()])
-        bottom_predict_log_file = os.path.join(
-            self.m_eval_output_path, 'eval_logging_bottom_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
-        with open(bottom_predict_log_file, 'a') as f:
-            f.write("user id: {}\n".format(true_userid))
-            f.write("item id: {}\n".format(true_itemid))
-            f.write("refs_j: {}\n".format(refs_sent))
-            for k in range(s_topk_candidate):
-                # key is the sentence content
-                # value is the probability of this sentence
-                f.write("candidate sentence: {}\n".format(bottom_cdd_hyps_j[k]))
-                f.write("prob: {}\n".format(bottom_cdd_probs_j[k].item()))
-                f.write("----:----:----:----:----:----:----:----:\n")
             f.write("========================================\n")
 
     def combine_featuretf(self, user_featuretf, item_featuretf):

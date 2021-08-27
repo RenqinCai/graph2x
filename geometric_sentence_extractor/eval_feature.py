@@ -19,18 +19,17 @@ from metric import get_feature_recall_precision, get_recall_precision_f1, get_re
 from metric import get_recall_precision_f1_gt, get_recall_precision_f1_gt_random
 from rouge import Rouge
 from nltk.translate import bleu_score
-import dgl
 import pickle
 import random
 
 
-dataset_name = 'medium_500_pure'
+# dataset_name = 'medium_500_pure'
 label_format = 'soft_label'
 
 # how to select the top-predicted sentences
 use_origin = False
-use_trigram = True
-use_trigram_feat_unigram_blocking = False
+use_trigram = False
+use_trigram_feat_unigram_blocking = True
 use_bleu_filter = False
 bleu_filter_value = 0.25
 
@@ -59,9 +58,9 @@ save_hyps_refs = True
 # False if the predicted features is compared with the proxy's features.
 use_ground_truth = True
 
-avg_proxy_feature_num = 19
-avg_gt_feature_num = 15
-total_feature_num = 575
+avg_proxy_feature_num = 10
+avg_gt_feature_num = 10
+total_feature_num = 503
 MAX_batch_output = 2000
 
 
@@ -75,6 +74,7 @@ class EVAL_FEATURE(object):
         self.m_dataset_name = args.data_set
         self.m_model_path = args.model_path
         self.m_model_file = args.model_file
+        self.m_data_dir = args.data_dir
         self.m_eval_output_path = args.eval_output_path
         self.m_model_file_name = args.model_file.split('/')[-1].split('.pt')[0]
         self.m_feature_topk = args.select_topk_f    # default: 15
@@ -98,8 +98,9 @@ class EVAL_FEATURE(object):
 
         self.m_criterion = nn.BCEWithLogitsLoss(reduction="none")
 
+        print("Data directory: {}".format(self.m_data_dir))
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
-        print("Dataset: {0} \t Label: {1}".format(dataset_name, label_format))
+        print("Dataset: {0} \t Label: {1}".format(self.m_dataset_name, label_format))
 
         print("--"*10 + "Feature Prediction" + "--"*10)
         if predict_features_vs_origin:
@@ -131,21 +132,23 @@ class EVAL_FEATURE(object):
             print("Not perform.")
 
         # need to load some mappings
-        id2feature_file = '../../Dataset/ratebeer/{}/train/feature/id2feature.json'.format(dataset_name)
-        feature2id_file = '../../Dataset/ratebeer/{}/train/feature/feature2id.json'.format(dataset_name)
-        trainset_id2sent_file = '../../Dataset/ratebeer/{}/train/sentence/id2sentence.json'.format(dataset_name)
-        testset_id2sent_file = '../../Dataset/ratebeer/{}/test/sentence/id2sentence.json'.format(dataset_name)
-        # trainset_useritem_pair_file = '../../Dataset/ratebeer/{}/train/useritem_pairs.json'.format(dataset_name)
-        testset_useritem_cdd_withproxy_file = '../../Dataset/ratebeer/{}/test/useritem2sentids_withproxy.json'.format(dataset_name)
-        trainset_user2featuretf_file = '../../Dataset/ratebeer/{}/train/user/user2featuretf.json'.format(dataset_name)
-        trainset_item2featuretf_file = '../../Dataset/ratebeer/{}/train/item/item2featuretf.json'.format(dataset_name)
-        trainset_sentid2featuretfidf_file = '../../Dataset/ratebeer/{}/train/sentence/sentence2feature.json'.format(dataset_name)
-        testset_sentid2featuretf_file = '../../Dataset/ratebeer/{}/test/sentence/sentence2featuretf.json'.format(dataset_name)
-        trainset_user2sentid_file = '../../Dataset/ratebeer/{}/train/user/user2sentids.json'.format(dataset_name)
-        trainset_item2sentid_file = '../../Dataset/ratebeer/{}/train/item/item2sentids.json'.format(dataset_name)
+        id2feature_file = os.path.join(self.m_data_dir, 'train/feature/id2feature.json')
+        feature2id_file = os.path.join(self.m_data_dir, 'train/feature/feature2id.json')
+        trainset_id2sent_file = os.path.join(self.m_data_dir, 'train/sentence/id2sentence.json')
+        testset_id2sent_file = os.path.join(self.m_data_dir, 'test/sentence/id2sentence.json')
+        # testset_sentid2feature_file = os.path.join(self.m_data_dir, 'valid/sentence/sentence2feature.json')
+        # trainset_useritem_pair_file = os.path.join(self.m_data_dir, 'train/useritem_pairs.json')
+        testset_useritem_cdd_withproxy_file = os.path.join(self.m_data_dir, 'test/useritem2sentids_withproxy.json')
+        trainset_user2featuretf_file = os.path.join(self.m_data_dir, 'train/user/user2featuretf.json')
+        trainset_item2featuretf_file = os.path.join(self.m_data_dir, 'train/item/item2featuretf.json')
+        # trainset_sentid2featuretf_file = os.path.join(self.m_data_dir, 'train/sentence/sentence2featuretf.json')
+        testset_sentid2featuretf_file = os.path.join(self.m_data_dir, 'test/sentence/sentence2featuretf.json')
+        trainset_user2sentid_file = os.path.join(self.m_data_dir, 'train/user/user2sentids.json')
+        trainset_item2sentid_file = os.path.join(self.m_data_dir, 'train/item/item2sentids.json')
+        trainset_sentid2featuretfidf_file = os.path.join(self.m_data_dir, 'train/sentence/sentence2feature.json')
         # Load the combined train/test set
-        trainset_combined_file = '../../Dataset/ratebeer/{}/train_combined.json'.format(dataset_name)
-        testset_combined_file = '../../Dataset/ratebeer/{}/test_combined.json'.format(dataset_name)
+        trainset_combined_file = os.path.join(self.m_data_dir, 'train_combined.json')
+        testset_combined_file = os.path.join(self.m_data_dir, 'test_combined.json')
 
         with open(id2feature_file, 'r') as f:
             print("Load file: {}".format(id2feature_file))
@@ -1059,7 +1062,7 @@ class EVAL_FEATURE(object):
     def feature_logits_save_file(self, true_userid_j, true_itemid_j, mask_f_logits_j):
         feature_logits_file = os.path.join(
             self.m_eval_output_path,
-            'feature_logits_{0}_{1}.txt'.format(dataset_name, label_format)
+            'feature_logits_{0}_{1}.txt'.format(self.m_dataset_name, label_format)
         )
         with open(feature_logits_file, 'a') as f_l:
             f_l.write("User: {0}\tItem: {1}\n".format(true_userid_j, true_itemid_j))
@@ -1218,7 +1221,7 @@ class EVAL_FEATURE(object):
         predict_features_print_logits = True
 
         features_result_file_path = os.path.join(
-            self.m_eval_output_path, 'eval_features_{0}_{1}.txt'.format(dataset_name, label_format))
+            self.m_eval_output_path, 'eval_features_{0}_{1}.txt'.format(self.m_dataset_name, label_format))
 
         proxy_featureids_set = set(proxy_featureids)
         gt_featureids_set = set(gt_featureids)
