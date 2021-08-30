@@ -8,7 +8,7 @@ import time
 import argparse
 
 # Multi-processing
-# import ray 
+# import ray
 from multiprocessing import Pool
 
 # scientific and machine learning toolkits
@@ -41,7 +41,7 @@ use_ILP = True                                  # using ILP to select sentences
 save_sentence_selected = False
 save_feature_selected = False
 
-save_hyps_refs = True
+save_hyps_refs_pool = False
 compute_rouge_score = True
 compute_bleu_score = True
 
@@ -167,20 +167,9 @@ class EVAL_ILP(object):
         2. Add mojority vote based baselines.
         3. Seperate code chunks into functions.
         """
-        self.rouge_1_f_list, self.rouge_1_p_list, self.rouge_1_r_list = [], [], []
-        self.rouge_2_f_list, self.rouge_2_p_list, self.rouge_2_r_list = [], [], []
-        self.rouge_l_f_list, self.rouge_l_p_list, self.rouge_l_r_list = [], [], []
-        self.bleu_list, self.bleu_1_list, self.bleu_2_list, self.bleu_3_list, self.bleu_4_list = [], [], [], [], []
-
-        self.num_empty_hyps = 0
-        self.num_too_long_hyps = 0
-
         print('--'*10)
         s_topk = self.select_s_topk
         print("Number of topk selected sentences: {}".format(s_topk))
-
-        # cnt_useritem_pair = 0
-        # save_logging_cnt = 0
 
         self.line_data_whole = []
         # Load the model's predictions from file line-by-line
@@ -188,11 +177,6 @@ class EVAL_ILP(object):
             print("Read file: {} line-by-line".format(self.model_pred_file))
             for line in f:
                 line_data = json.loads(line)
-                # user_id = line_data['user']
-                # item_id = line_data['item']
-                # cdd_sids_j = line_data['cdd_sids']
-                # target_sids_j = line_data['target_sids']
-                # cdd_sids2logits_j = line_data['cdd_sids2logits']
                 self.line_data_whole.append(line_data)
         whole_size = len(self.line_data_whole)
         print("Total number of lines: {}".format(whole_size))
@@ -216,7 +200,45 @@ class EVAL_ILP(object):
                 end_idx = whole_size
             idx_list_pool[i].extend(list(range(start_idx, end_idx)))
         with Pool(self.m_num_threads) as p:
-            p.map(self.Compute_ILP_Pool, idx_list_pool)
+            results_pool = p.map(self.Compute_ILP_Pool, idx_list_pool)
+
+        # save results into file
+        refs_file = os.path.join(self.m_eval_output_path, 'reference.txt')
+        hyps_file = os.path.join(self.m_eval_output_path, 'hypothesis.txt')
+        refs_json_file = os.path.join(self.m_eval_output_path, 'refs.json')
+        hyps_json_file = os.path.join(self.m_eval_output_path, 'hyps.json')
+        cnt_line = 0
+        with open(refs_file, 'w') as f_r, open(refs_json_file, 'w') as f_rj:
+            with open(hyps_file, 'w') as f_h, open(hyps_json_file, 'w') as f_hj:
+                for result in results_pool:
+                    for result_line in result:
+                        line_idx = result_line[0]
+                        user_id = result_line[1]
+                        item_id = result_line[2]
+                        refs_text = result_line[3]
+                        hyps_text = result_line[4]
+                        try:
+                            assert line_idx == cnt_line
+                        except AssertionError:
+                            print("whole line idx {} and pool line idx {} not aligned!".format(
+                                cnt_line, line_idx
+                            ))
+                        # write reference raw text
+                        f_r.write(refs_text)
+                        f_r.write("\n")
+                        # write reference raw text with user/item id
+                        ref_json_dict = {'user': user_id, 'item': item_id, 'text': refs_text}
+                        json.dump(ref_json_dict, f_rj)
+                        f_rj.write("\n")
+                        # write hypothesis raw text
+                        f_h.write(hyps_text)
+                        f_h.write("\n")
+                        # write hypothesis raw text with user/item id
+                        hyp_json_dict = {'user': user_id, 'item': item_id, 'text': hyps_text}
+                        json.dump(hyp_json_dict, f_hj)
+                        f_hj.write("\n")
+                        cnt_line += 1
+        print("Finish Writing {} lines of references and hypothesis into file.".format(cnt_line))
 
     def Compute_ILP_Pool(self, idx_list):
         """
@@ -229,6 +251,7 @@ class EVAL_ILP(object):
         rouge = Rouge()
         num_empty_hyps = 0
         num_too_long_hyps = 0
+        result_pool = []
         thread_idx = idx_list[0]
         print("[Thread {}] From line {} to line {} (totally {} lines).".format(
             thread_idx, idx_list[1], idx_list[-1], len(idx_list[1:])))
@@ -257,10 +280,16 @@ class EVAL_ILP(object):
             # Get the true combined reference text in data
             true_combined_ref = self.d_testset_combined[user_id][item_id]
 
+            # save the results to list
+            # idx: whole eval-set's line idx (start from 0)
+            result_pool.append(
+                [idx, user_id, item_id, true_combined_ref, hyps_i]
+            )
+
             if (i+1) % self.m_print_frequency == 0:
                 print("[Thread {}] Finish {} lines".format(thread_idx, i+1))
 
-            if save_hyps_refs:
+            if save_hyps_refs_pool:
                 # Compute ROUGE/BLEU score
                 # Save refs and selected hyps into file
                 refs_file = os.path.join(
@@ -364,6 +393,8 @@ class EVAL_ILP(object):
 
         print("[Thread {}] Finish!".format(thread_idx))
 
+        return result_pool
+
     def ILP_sent_prediction(self, user_id, item_id, cdd_sids, cdd_sids2logits, topk=3, alpha=1.0, thres=None, line_idx=0, thread_idx=0):
         """
         :param: user_id,                user id.
@@ -443,9 +474,14 @@ class EVAL_ILP(object):
         # Construct Objective
         ILP_m.setObjective(
             (cdd_sent_pred_scores @ X) - alpha * sum(
-                Y[i_m][j_m] * cosine_sim_upper[i_m][j_m] for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)),
+                Y[i_m] @ cosine_sim_upper[i_m] for i_m in range(pool_size)),
             GRB.MAXIMIZE
         )
+        # ILP_m.setObjective(
+        #     (cdd_sent_pred_scores @ X) - alpha * sum(
+        #         Y[i_m][j_m] * cosine_sim_upper[i_m][j_m] for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)),
+        #     GRB.MAXIMIZE
+        # )
         # Add the sum constrain of X
         ones_i = np.ones(len(cdd_sent_sids))
         ILP_m.addConstr(ones_i @ X == topk, name="c0")
@@ -456,9 +492,14 @@ class EVAL_ILP(object):
         )
         # Add the sum constraint of Y
         E_num = topk * (topk - 1) / 2
+
         ILP_m.addConstr(
-            sum(Y[i_m][j_m] for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)) == E_num, name="c2"
+            sum(sum(Y[i_m][i_m+1:]) for i_m in range(pool_size)) == E_num, name="c2"
         )
+        # ILP_m.addConstr(
+        #     sum(Y[i_m][j_m] for i_m in range(pool_size) for j_m in range(i_m+1, pool_size)) == E_num, name="c2"
+        # )
+
         # Optimize model
         ILP_m.optimize()
         # Get the obj value
@@ -676,11 +717,8 @@ if __name__ == "__main__":
     parser.add_argument('--select_topk_f', type=int, default=15)
 
     ### others
-    parser.add_argument('--eval', action='store_true', default=False)
-    parser.add_argument('--eval_ILP', action='store_true', default=False)
     parser.add_argument('--parallel', action="store_true", default=False)
     parser.add_argument('--select_top', action="store_true", default=False)
-    parser.add_argument('--local_rank', type=int, default=0)
     parser.add_argument('--select_lines', type=int, default=0)
     parser.add_argument('--num_threads', type=int, default=10)
     parser.add_argument('--print_freq', type=int, default=100)
