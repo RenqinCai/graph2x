@@ -1,7 +1,7 @@
 import os
 import io
 import json
-from dgl.convert import graph
+# from dgl.convert import graph
 import torch
 import numpy as np
 import random
@@ -62,15 +62,3 @@ class DATA():
         # print("train_loader", train_loader)
 
         return train_loader, valid_loader, vocab_obj
-
-# import dgl
-
-# def graph_collate_fn(samples):
-#     # ?
-#     graphs, index = map(list, zip(*samples))
-#     graph_len = [len(g.filter_nodes(lambda nodes: nodes.data["dtype"] == 1)) for g in graphs]
-#     sorted_len, sorted_index = torch.sort(torch.LongTensor(graph_len), dim=0, descending=True)
-#     batched_graph = dgl.batch([graphs[idx] for idx in sorted_index])
-#     batched_index = [index[idx] for idx in sorted_index]
-
-#     return batched_graph, batched_index

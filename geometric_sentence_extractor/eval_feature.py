@@ -17,6 +17,7 @@ import statistics
 from metric import compute_bleu, get_bleu, get_sentence_bleu, get_example_recall_precision
 from metric import get_feature_recall_precision, get_recall_precision_f1, get_recall_precision_f1_random, get_recall_precision_f1_popular, get_recall_precision_f1_sent
 from metric import get_recall_precision_f1_gt, get_recall_precision_f1_gt_random
+from metric import get_ndcg_score_pred, get_ndcg_score_random, get_auc_score_pred, get_auc_score_random
 from rouge import Rouge
 from nltk.translate import bleu_score
 import pickle
@@ -29,7 +30,7 @@ label_format = 'soft_label'
 # how to select the top-predicted sentences
 use_origin = False
 use_trigram = False
-use_trigram_feat_unigram_blocking = True
+use_trigram_feat_unigram_blocking = False
 use_bleu_filter = False
 bleu_filter_value = 0.25
 
@@ -52,16 +53,19 @@ predict_features_vs_trigram = False
 save_sentence_selected = False
 save_feature_selected = False
 save_feature_logits = False
-save_hyps_refs = True
+save_hyps_refs = False
 
 # True if the predicted features is compared with the ground-turth features.
 # False if the predicted features is compared with the proxy's features.
 use_ground_truth = True
 
+# Evaluate on train-set or test-set
+eval_on_test = True
+
 avg_proxy_feature_num = 10
 avg_gt_feature_num = 10
-total_feature_num = 503
-MAX_batch_output = 2000
+total_feature_num = 572
+MAX_batch_output = 5000
 
 
 class EVAL_FEATURE(object):
@@ -134,6 +138,7 @@ class EVAL_FEATURE(object):
         # need to load some mappings
         id2feature_file = os.path.join(self.m_data_dir, 'train/feature/id2feature.json')
         feature2id_file = os.path.join(self.m_data_dir, 'train/feature/feature2id.json')
+        feature2df_file = os.path.join(self.m_data_dir, 'train/feature/feature2df.json')
         trainset_id2sent_file = os.path.join(self.m_data_dir, 'train/sentence/id2sentence.json')
         testset_id2sent_file = os.path.join(self.m_data_dir, 'test/sentence/id2sentence.json')
         # testset_sentid2feature_file = os.path.join(self.m_data_dir, 'valid/sentence/sentence2feature.json')
@@ -146,16 +151,24 @@ class EVAL_FEATURE(object):
         trainset_user2sentid_file = os.path.join(self.m_data_dir, 'train/user/user2sentids.json')
         trainset_item2sentid_file = os.path.join(self.m_data_dir, 'train/item/item2sentids.json')
         trainset_sentid2featuretfidf_file = os.path.join(self.m_data_dir, 'train/sentence/sentence2feature.json')
+        # Load local feature df and number of cdd sentence for each user-item pair
+        trainset_useritem2featuredf_file = os.path.join(self.m_data_dir, 'train/useritem2featuredf.json')
+        trainset_useritem2cddsentnum_file = os.path.join(self.m_data_dir, 'train/useritem2cddsentnum.json')
+        testset_useritem2featuredf_file = os.path.join(self.m_data_dir, 'test/useritem2featuredf.json')
+        testset_useritem2cddsentnum_file = os.path.join(self.m_data_dir, 'test/useritem2cddsentnum.json')
         # Load the combined train/test set
         trainset_combined_file = os.path.join(self.m_data_dir, 'train_combined.json')
         testset_combined_file = os.path.join(self.m_data_dir, 'test_combined.json')
-
+        # Load features
         with open(id2feature_file, 'r') as f:
             print("Load file: {}".format(id2feature_file))
             self.d_id2feature = json.load(f)
         with open(feature2id_file, 'r') as f:
             print("Load file: {}".format(feature2id_file))
             self.d_feature2id = json.load(f)
+        with open(feature2df_file, 'r') as f:
+            print("Load file: {}".format(feature2df_file))
+            self.d_feature2df = json.load(f)
         # Load train/test sentence_id to sentence content
         with open(trainset_id2sent_file, 'r') as f:
             print("Load file: {}".format(trainset_id2sent_file))
@@ -195,6 +208,22 @@ class EVAL_FEATURE(object):
         with open(trainset_item2sentid_file, 'r') as f:
             print("Load file: {}".format(trainset_item2sentid_file))
             self.d_trainset_item2sentid = json.load(f)
+        # Load trainset useritem pair's feature df (each cdd sentence is viewed as a doc)
+        with open(trainset_useritem2featuredf_file, 'r') as f:
+            print("Load file: {}".format(trainset_useritem2featuredf_file))
+            self.d_trainset_useritem2featuredf = json.load(f)
+        # Load testset useritem pair's feature df (each cdd sentence (on train) is viewed as a doc)
+        with open(testset_useritem2featuredf_file, 'r') as f:
+            print("Load file: {}".format(testset_useritem2featuredf_file))
+            self.d_testset_useritem2featuredf = json.load(f)
+        # Load trainset useritem pair's cdd sentences' number
+        with open(trainset_useritem2cddsentnum_file, 'r') as f:
+            print("Load file: {}".format(trainset_useritem2cddsentnum_file))
+            self.d_trainset_useritem2cddsentnum = json.load(f)
+        # Load testset useritem pair's cdd sentences' number
+        with open(testset_useritem2cddsentnum_file, 'r') as f:
+            print("Load file: {}".format(testset_useritem2cddsentnum_file))
+            self.d_testset_useritem2cddsentnum = json.load(f)
         # Load train/test combined review for standard evaluation
         self.d_trainset_combined = dict()
         with open(trainset_combined_file, 'r') as f:
@@ -224,6 +253,8 @@ class EVAL_FEATURE(object):
                     self.d_testset_combined[userid][itemid] = review_text
 
         print("Total number of feature: {}".format(len(self.d_id2feature)))
+        print("Total number of sentences on train: {}".format(len(self.d_trainset_id2sent)))
+        print("Total number of sentences on test: {}".format(len(self.d_testset_id2sent)))
         global total_feature_num
         total_feature_num = len(self.d_id2feature)
 
@@ -270,6 +301,15 @@ class EVAL_FEATURE(object):
         f_only_item_side_ratio_gt_list = []
         f_both_user_item_ratio_gt_list = []
         f_none_user_item_ratio_gt_list = []
+        # ndcg and auc of the tf-idf feature ranking and uniform user-item intersection feature ranking
+        f_ndcg_tfidf_global_list = []
+        f_ndcg_tfidf_local_list = []
+        f_ndcg_uniform_list = []
+        f_auc_tfidf_global_list = []
+        f_auc_tfidf_local_list = []
+        f_auc_uniform_list = []
+        # number of gt features that are not on the cdd sentences' feature
+        f_num_gt_feature_unseen = []
 
         # average features in proxy/ground-truth
         proxy_feature_num_cnt = []
@@ -287,14 +327,24 @@ class EVAL_FEATURE(object):
             os.makedirs(output_dir)
         feat_sent_info_json_file = os.path.join(output_dir, 'feat_sent_info_{}batch.json'.format(MAX_batch_output))
 
+        work_data = None
+        if eval_on_test:
+            work_data = eval_data
+        else:
+            work_data = train_data
+
         self.m_network.eval()
         with torch.no_grad():
             print("Number of training data: {}".format(len(train_data)))
             print("Number of evaluation data: {}".format(len(eval_data)))
             print("Number of topk selected sentences: {}".format(s_topk))
             print("Number of topk selected features: {}".format(f_topk))
+            if eval_on_test:
+                print("Working on test-set")
+            else:
+                print("Working on train-set")
 
-            for graph_batch in eval_data:
+            for graph_batch in work_data:
                 if cnt_useritem_batch % 100 == 0:
                     print("... eval ... ", cnt_useritem_batch)
 
@@ -372,11 +422,14 @@ class EVAL_FEATURE(object):
 
                     # Get the hyps/refs/proxy sentences content
                     hyps_j = " ".join(hyps_j_list)
-                    # refs_j = " ".join(refs_j_list)
-                    refs_j = self.d_testset_combined[true_userid_j][true_itemid_j]
                     proxy_j_list = []
-                    for sid_k in self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][-1]:
-                        proxy_j_list.append(self.d_trainset_id2sent[sid_k])
+                    # refs_j = " ".join(refs_j_list)
+                    if eval_on_test:
+                        refs_j = self.d_testset_combined[true_userid_j][true_itemid_j]
+                        for sid_k in self.d_testset_useritem_cdd_withproxy[true_userid_j][true_itemid_j][-1]:
+                            proxy_j_list.append(self.d_trainset_id2sent[sid_k])
+                    else:
+                        refs_j = self.d_trainset_combined[true_userid_j][true_itemid_j]
                     proxy_j = " ".join(proxy_j_list)
 
                     # get feature prediction performance
@@ -390,9 +443,16 @@ class EVAL_FEATURE(object):
                     user_to_featuretf = self.d_trainset_user2featuretf[true_userid_j]
                     item_to_featuretf = self.d_trainset_item2featuretf[true_itemid_j]
                     useritem_to_featuretf = self.combine_featuretf(user_to_featuretf, item_to_featuretf)
+                    # useritem_to_featuretf_intersect = self.combine_featuretf_intersect(user_to_featuretf, item_to_featuretf)
                     useritem_popular_features = None
                     ui_popular_features_freq = None
 
+                    """ Compute the global/local feature tf-idf value
+                    """
+                    useritem_feature_tfidf_global = self.get_global_feature_tfidf(useritem_to_featuretf)
+                    useritem_feature_tfidf_local = self.get_local_feature_tfidf(
+                        useritem_to_featuretf, true_userid_j, true_itemid_j, eval_on_test
+                    )
                     """ Get the popular features (and the corresponding tf-value) for this user-item pair
                         The number of popular features has severla options:
                         1. average number of ground-truth sentences' unique features across the test set
@@ -476,6 +536,10 @@ class EVAL_FEATURE(object):
                     f_prec_j_pop, f_recall_j_pop, f_f1_j_pop, f_auc_j_pop = 0, 0, 0, 0
                     f_prec_j_sent, f_recall_j_sent, f_f1_j_sent, f_auc_j_sent = 0, 0, 0, 0
                     f_prec_j, f_recall_j, f_f1_j, f_auc_j = 0, 0, 0, 0
+                    f_ndcg_global_tfidf_j, f_ndcg_local_tfidf_j = 0, 0
+                    f_auc_tfidf_global_j, f_auc_tfidf_local_j = 0, 0
+                    f_ndcg_uniform_j, f_auc_uniform_j = 0, 0    # this uniform is only on the both user and item feature
+                    f_num_gt_feature_unseen_j = 0
 
                     if use_ground_truth:
                         # Popular Features
@@ -529,6 +593,25 @@ class EVAL_FEATURE(object):
                             f_prec_j, f_recall_j, f_f1_j, f_auc_j, top_pred_featureid_j = get_recall_precision_f1(
                                 mask_f_logits_j, target_f_labels_j, avg_proxy_feature_num)
 
+                    f_ndcg_global_tfidf_j, f_num_gt_feature_unseen_j = get_ndcg_score_pred(
+                        useritem_feature_tfidf_global, gt_featureid_j, user_to_featuretf, item_to_featuretf
+                    )
+                    f_ndcg_local_tfidf_j, _ = get_ndcg_score_pred(
+                        useritem_feature_tfidf_local, gt_featureid_j, user_to_featuretf, item_to_featuretf
+                    )
+                    f_ndcg_uniform_j, _ = get_ndcg_score_random(
+                        gt_featureid_j, user_to_featuretf, item_to_featuretf
+                    )
+                    f_auc_tfidf_global_j = get_auc_score_pred(
+                        useritem_feature_tfidf_global, gt_featureid_j, user_to_featuretf, item_to_featuretf
+                    )
+                    f_auc_tfidf_local_j = get_auc_score_pred(
+                        useritem_feature_tfidf_local, gt_featureid_j, user_to_featuretf, item_to_featuretf
+                    )
+                    f_auc_uniform_j = get_auc_score_random(
+                        gt_featureid_j, user_to_featuretf, item_to_featuretf
+                    )
+
                     # Add predicted (multi-task/random) features metrics
                     f_precision_list.append(f_prec_j)
                     f_recall_list.append(f_recall_j)
@@ -544,6 +627,14 @@ class EVAL_FEATURE(object):
                     f_sent_recall_list.append(f_recall_j_sent)
                     f_sent_F1_list.append(f_f1_j_sent)
                     f_sent_auc_list.append(f_auc_j_sent)
+                    # Feature tf-idf ranking ndcg
+                    f_ndcg_tfidf_global_list.append(f_ndcg_global_tfidf_j)
+                    f_ndcg_tfidf_local_list.append(f_ndcg_local_tfidf_j)
+                    f_ndcg_uniform_list.append(f_ndcg_uniform_j)
+                    f_auc_tfidf_global_list.append(f_auc_tfidf_global_j)
+                    f_auc_tfidf_local_list.append(f_auc_tfidf_local_j)
+                    f_auc_uniform_list.append(f_auc_uniform_j)
+                    f_num_gt_feature_unseen.append(f_num_gt_feature_unseen_j)
 
                     if save_hyps_refs and batch_save_flag:
                         self.feat_sent_result_save_file(
@@ -615,6 +706,14 @@ class EVAL_FEATURE(object):
         self.m_mean_f_only_item_side_ratio_gt = np.mean(f_only_item_side_ratio_gt_list)
         self.m_mean_f_both_user_item_ratio_gt = np.mean(f_both_user_item_ratio_gt_list)
         self.m_mean_f_none_user_item_ratio_gt = np.mean(f_none_user_item_ratio_gt_list)
+        # NCDG and AUC of the feature tfidf ranking
+        self.m_mean_f_ndcg_tfidf_global = np.mean(f_ndcg_tfidf_global_list)
+        self.m_mean_f_ndcg_tfidf_local = np.mean(f_ndcg_tfidf_local_list)
+        self.m_mean_f_ndcg_uniform = np.mean(f_ndcg_uniform_list)
+        self.m_mean_f_auc_tfidf_global = np.mean(f_auc_tfidf_global_list)
+        self.m_mean_f_auc_tfidf_local = np.mean(f_auc_tfidf_local_list)
+        self.m_mean_f_auc_uniform = np.mean(f_auc_uniform_list)
+        self.m_mean_f_gt_feature_unseen = np.mean(f_num_gt_feature_unseen)
 
         print("Totally {0} batches ({1} data instances).\nAmong them, {2} batches are saved into logging files.".format(
             len(eval_data), len(f_precision_list), save_logging_cnt
@@ -639,6 +738,15 @@ class EVAL_FEATURE(object):
             self.m_mean_f_both_user_item_ratio_gt,
             self.m_mean_f_none_user_item_ratio_gt
         ))
+        print("On average, %.4f features are on GT but unseen from the cdd" % (self.m_mean_f_gt_feature_unseen))
+        print("--"*10+"NCDG"+"--"*10)
+        print("Feature global tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_ndcg_tfidf_global))
+        print("Feature local tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_ndcg_tfidf_local))
+        print("Both user and item side feature uniform ranking vs. gt feature: %.4f" % (self.m_mean_f_ndcg_uniform))
+        print("--"*10+"AUC"+"--"*10)
+        print("Feature global tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_auc_tfidf_global))
+        print("Feature local tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_auc_tfidf_local))
+        print("Both user and item side feature uniform ranking vs. gt feature: %.4f" % (self.m_mean_f_auc_uniform))
 
         if predict_features:
             metric_log_file = os.path.join(
@@ -675,6 +783,15 @@ class EVAL_FEATURE(object):
                 self.m_mean_f_both_user_item_ratio_gt,
                 self.m_mean_f_none_user_item_ratio_gt
             ), file=f)
+            print("On average, %.4f features are on GT but unseen from the cdd" % (self.m_mean_f_gt_feature_unseen), file=f)
+            print("--"*10+"NCDG"+"--"*10, file=f)
+            print("Feature global tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_ndcg_tfidf_global), file=f)
+            print("Feature local tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_ndcg_tfidf_local), file=f)
+            print("Both user and item side feature uniform ranking vs. gt feature: %.4f" % (self.m_mean_f_ndcg_uniform), file=f)
+            print("--"*10+"AUC"+"--"*10, file=f)
+            print("Feature global tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_auc_tfidf_global), file=f)
+            print("Feature local tf-idf ranking vs. gt feature: %.4f" % (self.m_mean_f_auc_tfidf_local), file=f)
+            print("Both user and item side feature uniform ranking vs. gt feature: %.4f" % (self.m_mean_f_auc_uniform), file=f)
 
     def combine_featuretf(self, user_featuretf, item_featuretf):
         """ Add 2 dict together to get the feature tf-value on this user and this item
@@ -705,6 +822,16 @@ class EVAL_FEATURE(object):
 
         return useritem_featuretf
 
+    def combine_featuretf_intersect(self, user_featuretf, item_featuretf):
+        useritem_featuretf_intersect = dict()
+        user_featureids = set(user_featuretf.keys())
+        item_featureids = set(item_featuretf.keys())
+        useritem_intersect_featureids = user_featureids & item_featureids
+        for featureid in useritem_intersect_featureids:
+            useritem_featuretf_intersect[featureid] = user_featuretf[featureid] + item_featuretf[featureid]
+
+        return useritem_featuretf_intersect
+
     def get_popular_features(self, useritem_featuretf, topk=26):
         """ Get the popular features (id) based on the feature tf value
         return: topk_popular_features: topk popular feature's featureid, list
@@ -725,6 +852,46 @@ class EVAL_FEATURE(object):
         assert len(topk_popular_features) <= topk
 
         return topk_popular_features, topk_popular_features_freq
+
+    def get_global_feature_tfidf(self, useritem_feature_tf):
+        """
+            The formula for computing tf-idf:
+                (tf_u + tf_i) * log (N / df+1), N is the total number of train sents
+        """
+        useritem_feature_tfidf = dict()
+        N_trainset_sents = len(self.d_trainset_id2sent)
+        for key, value in useritem_feature_tf.items():
+            feature_id = key
+            feature_word = self.d_id2feature[feature_id]
+            feature_df = self.d_feature2df[feature_word]
+            feature_idf = N_trainset_sents / (feature_df + 1)
+            feature_tfidf = useritem_feature_tf[feature_id] * np.log(feature_idf)
+            assert feature_id not in useritem_feature_tfidf
+            useritem_feature_tfidf[feature_id] = feature_tfidf
+
+        return useritem_feature_tfidf
+
+    def get_local_feature_tfidf(self, useritem_feature_tf, true_user_id, true_item_id, on_test=True):
+        """
+            The formula for computing tf-idf:
+                (tf_u + tf_i) * log(N / df+1), N is the total number of cdd sents for this ui
+        """
+        useritem_feature_tfidf = dict()
+        if on_test:
+            N_cdd_sents_num = self.d_testset_useritem2cddsentnum[true_user_id][true_item_id]
+            local_feature_df = self.d_testset_useritem2featuredf[true_user_id][true_item_id]
+        else:
+            N_cdd_sents_num = self.d_trainset_useritem2cddsentnum[true_user_id][true_item_id]
+            local_feature_df = self.d_trainset_useritem2featuredf[true_user_id][true_item_id]
+        for key, value in useritem_feature_tf.items():
+            feature_id = key
+            feature_df = local_feature_df[feature_id]
+            feature_idf = N_cdd_sents_num / (feature_df + 1)
+            feature_tfidf = useritem_feature_tf[feature_id] * np.log(feature_idf)
+            assert feature_id not in useritem_feature_tfidf
+            useritem_feature_tfidf[feature_id] = feature_tfidf
+
+        return useritem_feature_tfidf
 
     def get_sid2featuretf_eval(self, testset_sentid2featuretf, sent2sid, train_sent_num):
         """ Get sid to featuretf mapping (on valid/test set).

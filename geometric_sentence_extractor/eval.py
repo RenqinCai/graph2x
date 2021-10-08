@@ -28,6 +28,7 @@ use_filtering = False       # whether using bleu score based filtering or not
 use_trigram_feat_unigram_blocking = True
 random_sampling = False
 bleu_filter_value = 0.25
+ignore_user_side_only_sents = False      # ignore sentences only from user side
 
 save_predict = False
 get_statistics = False
@@ -49,7 +50,7 @@ save_test_feature_hidden = False
 percentage_train_data_saved = 0.1
 
 MAX_batch_output = 5000
-# S_TOPK = 5
+Top_pool_size = None
 
 
 class EVAL(object):
@@ -82,22 +83,54 @@ class EVAL(object):
         self.m_model_file = args.model_file
         self.m_eval_output_path = args.eval_output_path
         self.m_data_dir = args.data_dir
-        self.m_dataset_name = args.data_dir.split('/')[-2]
+        self.m_dataset = args.data_set
+        self.m_dataset_name = args.data_name
         self.select_s_topk = args.select_topk_s
 
         print("Data directory: {}".format(self.m_data_dir))
         print("Evaluation results are saved under dir: {}".format(self.m_eval_output_path))
-        print("Dataset: {0} \t Label: {1}".format(self.m_dataset_name, label_format))
-        if use_blocking:
-            print("Using trigram blocking.")
-        elif use_filtering:
-            print("Using bleu-based filtering.")
-        elif use_trigram_feat_unigram_blocking:
-            print("Using trigram blocking + feature unigram blocking.")
-        elif random_sampling:
-            print("Random sampling.")
+        print("Dataset: {0} \t Label: {1}".format(self.m_dataset, label_format))
+
+        # Post-processing methods
+        if save_predict:
+            print("--"*10+"save model's predictions."+"--"*10)
+            # save sid2words and sid2sentid mapping
+            self.model_pred_DIR = '../data_postprocess/{}'.format(self.m_dataset)
+            self.model_pred_DIR = os.path.join(self.model_pred_DIR, self.m_model_file.split('.')[0])
+            print("Prediction files are saved under the directory: {}".format(self.model_pred_DIR))
+            self.model_pred_file = os.path.join(self.model_pred_DIR, 'model_pred_multiline.json')
+            if not os.path.isdir(self.model_pred_DIR):
+                os.makedirs(self.model_pred_DIR)
+                print("create folder: {}".format(self.model_pred_DIR))
+            else:
+                print("{} folder already exists.".format(self.model_pred_DIR))
+            sid2swords_file = os.path.join(self.model_pred_DIR, 'sid2swords.pickle')
+            sid2sentid_file = os.path.join(self.model_pred_DIR, 'sid2sentid.pickle')
+            with open(sid2swords_file, 'wb') as handle:
+                print("Write file: {}".format(sid2swords_file))
+                pickle.dump(self.m_sid2swords, handle, protocol=pickle.HIGHEST_PROTOCOL)
+            with open(sid2sentid_file, 'wb') as handle:
+                print("Write file: {}".format(sid2sentid_file))
+                pickle.dump(self.m_sid2sentid, handle, protocol=pickle.HIGHEST_PROTOCOL)
         else:
-            print("Use the original scores.")
+            print("--"*10+"post-processing method"+"--"*10)
+            if use_blocking:
+                print("Using trigram blocking.")
+            elif use_filtering:
+                print("Using bleu-based filtering.")
+            elif use_trigram_feat_unigram_blocking:
+                print("Using trigram blocking + feature unigram blocking.")
+            elif random_sampling:
+                print("Random sampling.")
+            else:
+                print("Use the original scores.")
+            if Top_pool_size is not None:
+                print("Selecting from the top-{} pool.".format(Top_pool_size))
+            if ignore_user_side_only_sents:
+                print("Ignore sentences which only appears on user-side.")
+
+        # Baselines of sentence prediction scores
+        print("--"*10+"sentence predict score"+"--"*10)
         if use_majority_vote_popularity:
             print("hypothesis selected based on feature popularity.")
         elif use_majority_vote_feature_score:
@@ -108,6 +141,7 @@ class EVAL(object):
             print("hypothesis selected based on original score and filtering methods.")
 
         # need to load some mappings
+        print("--"*10+"load preliminary mappings"+"--"*10)
         id2feature_file = os.path.join(self.m_data_dir, 'train/feature/id2feature.json')
         feature2id_file = os.path.join(self.m_data_dir, 'train/feature/feature2id.json')
         trainset_id2sent_file = os.path.join(self.m_data_dir, 'train/sentence/id2sentence.json')
@@ -209,18 +243,10 @@ class EVAL(object):
         # Get the sid2feature dict (on Train Set)
         self.d_trainset_sid2feature = self.get_sid2feature_train(
             self.d_trainset_sentid2featuretfidf, self.m_sent2sid)
-
-        # save sid2words mapping
-        if save_predict:
-            self.this_DIR = '../data_postprocess/{}'.format(self.m_dataset_name)
-            if not os.path.isdir(self.this_DIR):
-                os.makedirs(self.this_DIR)
-                print("create folder: {}".format(self.this_DIR))
-            else:
-                print("{} folder already exists.".format(self.this_DIR))
-            this_mapping_file = os.path.join(self.this_DIR, 'sid2swords.pickle')
-            with open(this_mapping_file, 'wb') as handle:
-                pickle.dump(self.m_sid2swords, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        # Get the userid2sid dict (convert sentid to sid)
+        self.d_trainset_user2sid = self.get_user2sid_train()
+        # Get the itemid2sid dict (convert sentid to sid)
+        self.d_trainset_item2sid = self.get_item2sid_train()
 
     def f_init_eval(self, network, model_file=None, reload_model=False):
         if reload_model:
@@ -416,38 +442,20 @@ class EVAL(object):
                 # logits: batch_size*max_sen_num
                 s_logits, sids, s_masks, target_sids, f_logits, fids, f_masks, target_f_labels, hidden_f_batch = self.m_network.eval_forward(graph_batch)
                 batch_size = s_logits.size(0)
+                # get batch userid and itemid
+                uid_batch = graph_batch.u_rawid
+                iid_batch = graph_batch.i_rawid
+                # map uid to userid and iid to itemid
+                userid_batch = [self.m_uid2user[uid_batch[j].item()] for j in range(batch_size)]
+                itemid_batch = [self.m_iid2item[iid_batch[j].item()] for j in range(batch_size)]
 
                 # Save the predict logits and sids
-                # if save_predict:
-                #     userid_batch = graph_batch.u_rawid
-                #     itemid_batch = graph_batch.i_rawid
-                #     for i in range(batch_size):
-                #         current_result_dict = {}
-                #         current_result_dict['user_id'] = userid_batch[i].item()
-                #         current_result_dict['item_id'] = itemid_batch[i].item()
-                #         assert len(s_logits[i]) == len(sids[i])
-                #         assert len(s_logits[i]) == len(s_masks[i])
-                #         triple_data_list = []
-                #         for pos in range(len(s_logits[i])):
-                #             triple_data_list.append(
-                #                 [s_logits[i][pos].item(), sids[i][pos].item(), s_masks[i][pos].item()])
-                #         current_result_dict['predict_data'] = triple_data_list
-                #         current_target_sent_sids = []
-                #         for this_sid in target_sids[i]:
-                #             current_target_sent_sids.append(this_sid.item())
-                #         current_result_dict['target'] = current_target_sent_sids
-
-                #         # save current_result_dict into json file
-                #         model_ckpt_name = self.m_model_file.split('.')[0]
-                #         this_json_file = os.path.join(self.this_DIR, 'result_{}.json'.format(model_ckpt_name))
-                #         with open(this_json_file, 'a') as f:
-                #             json.dump(current_result_dict, f)
-                #             f.write("\n")
-                #     continue
+                if save_predict:
+                    self.save_model_predict(graph_batch, batch_size, s_logits, sids, s_masks, target_sids)
+                    cnt_useritem_batch += 1
+                    continue
 
                 if random_sampling:
-                    userid_batch = graph_batch.u_rawid
-                    itemid_batch = graph_batch.i_rawid
                     for i in range(batch_size):
                         # current_result_dict = {}
                         # current_result_dict['user_id'] = self.m_uid2user[userid_batch[i].item()]
@@ -462,7 +470,7 @@ class EVAL(object):
                         for this_sid in target_sids[i]:
                             current_target_sent_sids.append(this_sid.item())
                         # randomly sample 3 sentences
-                        sampled_cdd_sent_sids = random.sample(current_cdd_sent_sids, 3)
+                        sampled_cdd_sent_sids = random.sample(current_cdd_sent_sids, s_topk)
                         # get the content
                         refs_j_list = []
                         hyps_j_list = []
@@ -513,33 +521,22 @@ class EVAL(object):
                     cnt_useritem_batch += 1
                     continue
 
-                # elif get_statistics:
-                #     for i in range(batch_size):
-                #         this_g = graph_batch[i]
-                #         labels_feature = this_g.f_label
-                #         print("shape of feature labels: {}".format(labels_feature.shape))
-                #         num_features_per_target_review.append(torch.sum(labels_feature).item())
-                #     continue
-
                 elif use_blocking:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate
+                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate, pool_size=Top_pool_size, user_ids=userid_batch, item_ids=itemid_batch
                     )
                 elif use_trigram_feat_unigram_blocking:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.trigram_unigram_blocking_sent_prediction(
-                        s_logits, sids, s_masks, n_win=3, topk=s_topk, topk_cdd=s_topk_candidate
+                        s_logits, sids, s_masks, n_win=3, topk=s_topk, topk_cdd=s_topk_candidate, pool_size=Top_pool_size, user_ids=userid_batch, item_ids=itemid_batch
                     )
                 elif use_filtering:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.bleu_filtering_sent_prediction(
-                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate, bleu_bound=bleu_filter_value
+                        s_logits, sids, s_masks, batch_size, topk=s_topk, topk_cdd=s_topk_candidate, bleu_bound=bleu_filter_value, pool_size=Top_pool_size
                     )
                 else:
                     s_topk_logits, s_pred_sids, s_top_cdd_logits, s_top_cdd_pred_sids, s_bottom_cdd_logits, s_bottom_cdd_pred_sids = self.origin_blocking_sent_prediction(
                         s_logits, sids, s_masks, topk=s_topk, topk_cdd=s_topk_candidate
                     )
-
-                userid = graph_batch.u_rawid
-                itemid = graph_batch.i_rawid
 
                 # Decide the batch_save_flag. To get shorted results, we only print the first several batches' results
                 cnt_useritem_batch += 1
@@ -557,20 +554,22 @@ class EVAL(object):
                     # break
 
                 for j in range(batch_size):
-                    userid_j = userid[j].item()
-                    itemid_j = itemid[j].item()
                     # get the true user/item id
-                    true_userid_j = self.m_uid2user[userid_j]
-                    true_itemid_j = self.m_iid2item[itemid_j]
+                    # true_userid_j = self.m_uid2user[userid_j]
+                    # true_itemid_j = self.m_iid2item[itemid_j]
+                    true_userid_j = userid_batch[j]
+                    true_itemid_j = itemid_batch[j]
 
                     refs_j_list = []
                     hyps_j_list = []
+                    hyps_sid_j_list = []
                     hyps_featureid_j_list = []
                     for sid_k in target_sids[j]:
                         refs_j_list.append(self.m_sid2swords[sid_k.item()])
 
                     for sid_k in s_pred_sids[j]:
                         hyps_j_list.append(self.m_sid2swords[sid_k.item()])
+                        hyps_sid_j_list.append(int(sid_k.item()))
                         hyps_featureid_j_list.extend(self.d_trainset_sid2feature[sid_k.item()])
 
                     hyps_num_unique_features = len(set(hyps_featureid_j_list))
@@ -740,7 +739,8 @@ class EVAL(object):
                                 f_hyp.write("\n")
                             with open(hyps_json_file, 'a') as f_hyp_json:
                                 cur_hyp_json = {
-                                    'user': true_userid_j, 'item': true_itemid_j, 'text': hyps_j
+                                    'user': true_userid_j, 'item': true_itemid_j,
+                                    'text': hyps_j, 'sids': hyps_sid_j_list
                                 }
                                 json.dump(cur_hyp_json, f_hyp_json)
                                 f_hyp_json.write("\n")
@@ -884,8 +884,9 @@ class EVAL(object):
                 #     print("Number of sentences for each target review (on average): {}".format(
                 #         self.m_mean_num_sents_per_target_review), file=f)
 
-    def trigram_feat_unigram_blocking(self, sents, p_sent, n_win=3, topk=5, use_feat_freq_in_sent=False):
+    def trigram_feat_unigram_blocking(self, sids, sents, p_sent, n_win=3, topk=5, use_feat_freq_in_sent=False, pool_size=None, user_ids=None, item_ids=None):
         """ a combination of trigram blocking and soft feature-unigram blocking
+        :param sids:    batch of lists of candidate sentence's sids (already converted to int). shape: [batch_size, sent_num]
         :param sents:   batch of list of candidate sentence, each candidate sentence is a string.
                         shape: (batch_size, sent_num)
         :param p_sent:  torch tensor. batch of predicted scores of each candidate sentence.
@@ -903,7 +904,7 @@ class EVAL(object):
         feat_overlap_threshold = 1
         # 1. Perform trigram blocking, get the top-100 predicted sentences
         batch_select_idx_trigram, batch_select_proba_trigram, batch_select_rank_trigram = self.ngram_blocking(
-            sents=sents, p_sent=p_sent, n_win=n_win, k=100
+            sids=sids, sents=sents, p_sent=p_sent, n_win=n_win, k=100, use_topk=True, pool_size=pool_size, user_ids=user_ids, item_ids=item_ids
         )
         # 2. Perform feature-unigram blocking
         for batch_idx in range(batch_size):
@@ -964,12 +965,17 @@ class EVAL(object):
         # batch_select_idx = torch.LongTensor(batch_select_idx)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
-    def ngram_blocking(self, sents, p_sent, n_win, k, use_topk=True):
+    def ngram_blocking(self, sids, sents, p_sent, n_win, k, use_topk=True, pool_size=None, user_ids=None, item_ids=None):
         """ ngram blocking
-        :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
-        :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
-        :param n_win:   ngram window size, i.e. which n-gram we are using. n_win can be 2,3,4,...
-        :param k:       we are selecting the top-k sentences
+        :param sids:        batch of lists of candidate sentence's sids (already converted to int). shape: [batch_size, sent_num]
+        :param sents:       batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
+        :param p_sent:      torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: [batch_sizem, sent_num]
+        :param n_win:       ngram window size, i.e. which n-gram we are using. n_win can be 2,3,4,...
+        :param k:           we are selecting the top-k sentences
+        :param use_topk:    whether we select the top-k sentences
+        :param pool_size:   the number of the top-N sentences can be selected
+        :param user_ids:    list of (true) user_id for this batch of sentences predictions
+        :param item_ids:    list of (true) item_id for this batch of sentences predictions
 
         :return:        selected index of sids
         """
@@ -983,11 +989,25 @@ class EVAL(object):
             assert len(sents[i]) == len(p_sent[i])
         for batch_idx in range(batch_size):
             ngram_list = []
+            # sort sentences based on the relevance score
             _, sorted_idx = p_sent[batch_idx].sort(descending=True)
             select_idx, select_proba, select_rank = [], [], []
             idx_rank = 0
+            if ignore_user_side_only_sents:
+                # ignore sentences that only appear on user-side
+                # construct the set of user-side-only sentences's sid for this user-item pair
+                user_side_sids = set(self.d_trainset_user2sid[user_ids[batch_idx]])
+                item_side_sids = set(self.d_trainset_item2sid[item_ids[batch_idx]])
+                user_item_both_sids = user_side_sids & item_side_sids
+                user_side_only_sids = user_side_sids - user_item_both_sids
             for idx in sorted_idx:
                 idx_rank += 1
+                if pool_size is not None and idx_rank > pool_size:
+                    # this suggests that we have already searched all the cdd sents from pool
+                    break
+                if ignore_user_side_only_sents:
+                    if sids[batch_idx][idx] in user_side_only_sids:
+                        continue
                 try:
                     cur_sent = sents[batch_idx][idx]
                 except KeyError:
@@ -1003,7 +1023,7 @@ class EVAL(object):
                     else:
                         cur_sent_ngrams.append(this_ngram)
                 if not overlap_flag:
-                    if p_sent[batch_idx][idx] < 0.0:
+                    if p_sent[batch_idx][idx] <= 0.0:
                         # this suggest that this idx is already the pad idx
                         break
                     select_idx.append(idx)
@@ -1019,12 +1039,13 @@ class EVAL(object):
         # batch_select_idx = torch.LongTensor(batch_select_idx)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
-    def bleu_filtering(self, sents, p_sent, k, filter_value=0.25):
+    def bleu_filtering(self, sents, p_sent, k, filter_value=0.25, pool_size=None):
         """ bleu filtering
         :param sents:   batch of lists of candidate sentence, each candidate sentence is a string. shape: [batch_size, sent_num]
         :param p_sent:  torch tensor. batch of predicted/relevance scores of each candidate sentence. shape: (batch_sizem, sent_num)
         :param k:       we are selecting the top-k sentences
         :param filter_value: the boundary value of bleu-2 + bleu-3 that defines whether we should filter a sentence
+        :param pool_size:    the number of the top-N sentences can be selected
 
         :return:        selected index of sids
         """
@@ -1046,10 +1067,15 @@ class EVAL(object):
             idx_rank = 0
             for idx in sorted_idx:
                 idx_rank += 1
+                if pool_size is not None and idx_rank > pool_size:
+                    break
                 try:
                     cur_sent = sents[batch_idx][idx]
                 except KeyError:
                     print("Error! batch: {0} \t idx: {1}".format(batch_idx, idx))
+                if p_sent[batch_idx][idx] <= 0.0:
+                    # masked sentences have logits of 0.0
+                    break
                 if len(select_sents) == 0:
                     # add current sentence into the selected sentences
                     select_sents.append(cur_sent)
@@ -1086,41 +1112,58 @@ class EVAL(object):
         batch_select_idx = torch.LongTensor(batch_select_idx)
         return batch_select_idx, batch_select_proba, batch_select_rank
 
-    def origin_blocking_sent_prediction(self, s_logits, sids, s_masks, topk=3, topk_cdd=20):
+    def origin_blocking_sent_prediction(self, s_logits, sids, s_masks, topk=3, topk_cdd=20, user_ids=None, item_ids=None):
         # incase some not well-trained model will predict the logits for all sentences as 0.0, we apply masks on it
-        masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        # masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        s_logits = s_logits.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
-        topk_logits, topk_pred_snids = torch.topk(masked_s_logits, topk, dim=1)
+        # topk_logits, topk_pred_snids = torch.topk(masked_s_logits, topk, dim=1)
+        if ignore_user_side_only_sents:
+            # TODO: implement user-side only sentences sids filtering for original sentence selection
+            topk_logits, topk_pred_snids = torch.topk(s_logits, topk, dim=1)
+        else:
+            topk_logits, topk_pred_snids = torch.topk(s_logits, topk, dim=1)
         # topk sentence index
         # pred_sids: shape: (batch_size, topk_sent)
         sids = sids.cpu()
         pred_sids = sids.gather(dim=1, index=topk_pred_snids)
         # 2. get the top-20 predicted sentences' content and proba
-        top_cdd_logits, top_cdd_pred_snids = torch.topk(masked_s_logits, topk_cdd, dim=1)
+        # top_cdd_logits, top_cdd_pred_snids = torch.topk(masked_s_logits, topk_cdd, dim=1)
+        if ignore_user_side_only_sents:
+            # TODO:
+            top_cdd_logits, top_cdd_pred_snids = torch.topk(s_logits, topk_cdd, dim=1)
+        else:
+            top_cdd_logits, top_cdd_pred_snids = torch.topk(s_logits, topk_cdd, dim=1)
         top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         # 3. get the bottom-20 predicted sentences' content and proba
-        reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        # reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        reverse_s_logits = (1-s_logits)*s_masks.cpu()
         bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
         bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def trigram_blocking_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20):
+    def trigram_blocking_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20, pool_size=50, user_ids=None, item_ids=None):
         # use n-gram blocking
         # get all the sentence content
         batch_sents_content = []
+        sids_int = []
         assert len(sids) == s_logits.size(0)      # this is the batch size
         for i in range(batch_size):
             cur_sents_content = []
+            cur_sids_int = []
             for cur_sid in sids[i]:
                 cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
+                cur_sids_int.append(int(cur_sid.item()))
             batch_sents_content.append(cur_sents_content)
+            sids_int.append(cur_sids_int)
         assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
-        masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        # masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        s_logits = s_logits.cpu()
         sids = sids.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
         ngram_block_pred_snids, ngram_block_pred_proba, ngram_block_pred_rank = self.ngram_blocking(
-            batch_sents_content, masked_s_logits, n_win=3, k=topk
+            sids_int, batch_sents_content, s_logits, n_win=3, k=topk, use_topk=True, pool_size=pool_size, user_ids=user_ids, item_ids=item_ids
         )
         # pred_sids = sids.gather(dim=1, index=ngram_block_pred_snids)
         pred_sids = []
@@ -1129,20 +1172,21 @@ class EVAL(object):
         topk_logits = ngram_block_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.ngram_blocking(
-            batch_sents_content, masked_s_logits, n_win=3, k=topk_cdd
+            sids_int, batch_sents_content, s_logits, n_win=3, k=topk_cdd, use_topk=True, pool_size=None, user_ids=user_ids, item_ids=item_ids
         )
         # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         top_cdd_pred_sids = []
         for i in range(batch_size):
             top_cdd_pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(top_cdd_pred_snids[i])))
         # 3. get the bottom-20 predicted sentences' content and proba
-        reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        # reverse_s_logits = (1 - masked_s_logits) * s_masks.cpu()
+        reverse_s_logits = (1 - s_logits) * s_masks.cpu()
         bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
         bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def trigram_unigram_blocking_sent_prediction(self, s_logits, sids, s_masks, n_win=3, topk=5, topk_cdd=20):
+    def trigram_unigram_blocking_sent_prediction(self, s_logits, sids, s_masks, n_win=3, topk=5, topk_cdd=20, pool_size=50, user_ids=None, item_ids=None):
         """use trigram blocking and soft unigram feature word blocking
         :param: s_logits:
         :param: sids:
@@ -1151,18 +1195,24 @@ class EVAL(object):
         :param: topk_cdd:  sanity check. select the top-k candidate sentences, used to tune topk. default: 20
         """
         batch_sents_content = []
+        sids_int = []
         assert sids.size(0) == s_logits.size(0)     # this is the batch_size
         batch_size = sids.size(0)
         for i in range(batch_size):
             cur_sents_content = []
+            cur_sids_int = []
             for cur_sid in sids[i]:
                 cur_sents_content.append(self.m_sid2swords[cur_sid.item()])
+                cur_sids_int.append(int(cur_sid.item()))
             batch_sents_content.append(cur_sents_content)
-        masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+            sids_int.append(cur_sids_int)
+        # masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        s_logits = s_logits.cpu()
         sids = sids.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
         trigram_feat_block_pred_snids, trigram_feat_block_pred_proba, trigram_feat_block_pred_rank = self.trigram_feat_unigram_blocking(
-            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk, use_feat_freq_in_sent=False
+            sids=sids_int, sents=batch_sents_content, p_sent=s_logits, n_win=n_win,
+            topk=topk, use_feat_freq_in_sent=False, pool_size=pool_size, user_ids=user_ids, item_ids=item_ids
         )
         pred_sids = []
         for i in range(batch_size):
@@ -1170,20 +1220,22 @@ class EVAL(object):
         topk_logits = trigram_feat_block_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.trigram_feat_unigram_blocking(
-            sents=batch_sents_content, p_sent=masked_s_logits, n_win=n_win, topk=topk_cdd, use_feat_freq_in_sent=False
+            sids=sids_int, sents=batch_sents_content, p_sent=s_logits, n_win=n_win,
+            topk=topk_cdd, use_feat_freq_in_sent=False, pool_size=None, user_ids=user_ids, item_ids=item_ids
         )
         # top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         top_cdd_pred_sids = []
         for i in range(batch_size):
             top_cdd_pred_sids.append(sids[i].gather(dim=0, index=torch.tensor(top_cdd_pred_snids[i])))
         # 3. get the bottom-20 predicted sentences' content and proba
-        reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        # reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        reverse_s_logits = (1-s_logits)*s_masks.cpu()
         bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
         bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
 
-    def bleu_filtering_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20, bleu_bound=0.25):
+    def bleu_filtering_sent_prediction(self, s_logits, sids, s_masks, batch_size, topk=3, topk_cdd=20, bleu_bound=0.25, pool_size=50):
         # use bleu-based filtering
         # get all the sentence content
         batch_sents_content = []
@@ -1196,22 +1248,68 @@ class EVAL(object):
             batch_sents_content.append(cur_sents_content)
         assert len(batch_sents_content[0]) == len(batch_sents_content[-1])      # this is the max_sent_len (remember we are using zero-padding for batch data)
         sids = sids.cpu()
-        masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        # masked_s_logits = (s_logits.cpu()+1)*s_masks.cpu()-1
+        s_logits = s_logits.cpu()
         # 1. get the top-k predicted sentences which form the hypothesis
         bleu_filter_pred_snids, bleu_filter_pred_proba, bleu_filter_pred_rank = self.bleu_filtering(
-            batch_sents_content, masked_s_logits, k=topk, filter_value=bleu_bound)
+            batch_sents_content, s_logits, k=topk, filter_value=bleu_bound, pool_size=pool_size
+        )
         pred_sids = sids.gather(dim=1, index=bleu_filter_pred_snids)
         topk_logits = bleu_filter_pred_proba
         # 2. get the top-20 predicted sentences' content and proba
         top_cdd_pred_snids, top_cdd_logits, _ = self.bleu_filtering(
-            batch_sents_content, masked_s_logits, k=topk_cdd, filter_value=bleu_bound)
+            batch_sents_content, s_logits, k=topk_cdd, filter_value=bleu_bound, pool_size=None
+        )
         top_cdd_pred_sids = sids.gather(dim=1, index=top_cdd_pred_snids)
         # 3. get the bottom-20 predicted sentences' content and proba
-        reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        # reverse_s_logits = (1-masked_s_logits)*s_masks.cpu()
+        reverse_s_logits = (1-s_logits)*s_masks.cpu()
         bottom_cdd_logits, bottom_cdd_pred_snids = torch.topk(reverse_s_logits, topk_cdd, dim=1)
         bottom_cdd_pred_sids = sids.gather(dim=1, index=bottom_cdd_pred_snids)
 
         return topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids
+
+    def save_model_predict(self, graph_batch, batch_size, s_logits, sids, s_masks, target_sids):
+        userid_batch = graph_batch.u_rawid
+        itemid_batch = graph_batch.i_rawid
+        for j in range(batch_size):
+            userid_j = userid_batch[j].item()
+            itemid_j = itemid_batch[j].item()
+            # get the true user/item id
+            true_userid_j = self.m_uid2user[userid_j]
+            true_itemid_j = self.m_iid2item[itemid_j]
+            assert s_logits[j].size(0) == sids[j].size(0)
+            assert s_logits[j].size(0) == s_masks[j].size(0)
+            num_sents_j = int(sum(s_masks[j]).item())
+            # get predict sids and relevant logits
+            cdd_sent_sids_j = []
+            target_sent_sids_j = []
+            cdd_sent_sids2logits_j = {}
+            for ij in range(num_sents_j):
+                sid_ij = sids[j][ij].item()
+                assert sid_ij == int(sid_ij)
+                sid_ij = int(sid_ij)
+                cdd_sent_sids_j.append(sid_ij)
+                assert sid_ij not in cdd_sent_sids2logits_j
+                cdd_sent_sids2logits_j[sid_ij] = s_logits[j][ij].item()
+            for sid_ij in target_sids[j]:
+                target_sent_sids_j.append(sid_ij.item())
+            # triple_data_list = []
+            # for pos in range(len(s_logits[j])):
+            #     triple_data_list.append(
+            #         [s_logits[j][pos].item(), sids[j][pos].item(), s_masks[j][pos].item()])
+            # predict_data_j['predict_data'] = triple_data_list
+            # get this user-item's predict data
+            predict_data_j = {
+                'user': true_userid_j,
+                'item': true_itemid_j,
+                'cdd_sids': cdd_sent_sids_j,
+                'target_sids': target_sent_sids_j,
+                'cdd_sids2logits': cdd_sent_sids2logits_j
+            }
+            with open(self.model_pred_file, 'a') as f:
+                json.dump(predict_data_j, f)
+                f.write('\n')
 
     def save_predict_sentences(self, true_userid, true_itemid, refs_sent, hyps_sent, topk_logits, pred_sids, top_cdd_logits, top_cdd_pred_sids, bottom_cdd_logits, bottom_cdd_pred_sids, s_topk_candidate=20):
         # top-predicted/selected sentences
@@ -1487,3 +1585,23 @@ class EVAL(object):
             assert sid not in trainset_sid2feature
             trainset_sid2feature[sid] = list(value.keys())
         return trainset_sid2feature
+
+    def get_user2sid_train(self):
+        trainset_user2sid = dict()
+        for userid_j, sentids_j in self.d_trainset_user2sentid.items():
+            assert isinstance(userid_j, str)
+            assert isinstance(sentids_j, list)
+            sids_j = [self.m_sent2sid[sentid_j] for sentid_j in sentids_j]
+            assert userid_j not in trainset_user2sid
+            trainset_user2sid[userid_j] = sids_j
+        return trainset_user2sid
+
+    def get_item2sid_train(self):
+        trainset_item2sid = dict()
+        for itemid_j, sentids_j in self.d_trainset_item2sentid.items():
+            assert isinstance(itemid_j, str)
+            assert isinstance(sentids_j, list)
+            sids_j = [self.m_sent2sid[sentid_j] for sentid_j in sentids_j]
+            assert itemid_j not in trainset_item2sid
+            trainset_item2sid[itemid_j] = sids_j
+        return trainset_item2sid

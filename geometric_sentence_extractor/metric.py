@@ -11,7 +11,82 @@ import math
 from nltk.translate import bleu_score
 from rouge_score import rouge_scorer
 from sklearn import metrics
+from sklearn.metrics import ndcg_score
 import random
+
+
+def get_ndcg_score_pred(pred_feature_scores, target_featureids, user2featuretf, item2featuretf):
+    user_featureids = set(user2featuretf.keys())
+    item_featureids = set(item2featuretf.keys())
+    useritem_featureids_union = user_featureids | item_featureids
+    pred_scores = np.zeros((1, len(useritem_featureids_union)))
+    true_scores = np.zeros((1, len(useritem_featureids_union)))
+    cnt_new_gt_feature = 0
+    for featureid in target_featureids:
+        if featureid not in useritem_featureids_union:
+            cnt_new_gt_feature += 1
+    for idx, featureid in enumerate(list(useritem_featureids_union)):
+        if featureid in pred_feature_scores:
+            pred_scores[0][idx] = pred_feature_scores[featureid]
+        if featureid in target_featureids:
+            true_scores[0][idx] = 1.0
+    return ndcg_score(true_scores, pred_scores), cnt_new_gt_feature
+
+
+def get_ndcg_score_random(target_featureids, user2featuretf, item2featuretf):
+    user_featureids = set(user2featuretf.keys())
+    item_featureids = set(item2featuretf.keys())
+    useritem_featureids_union = user_featureids | item_featureids
+    useritem_featureids_inter = user_featureids & item_featureids
+    pred_scores = np.zeros((1, len(useritem_featureids_union)))
+    true_scores = np.zeros((1, len(useritem_featureids_union)))
+    cnt_new_gt_feature = 0
+    for featureid in target_featureids:
+        if featureid not in useritem_featureids_union:
+            cnt_new_gt_feature += 1
+    for idx, featureid in enumerate(list(useritem_featureids_union)):
+        if featureid in useritem_featureids_inter:
+            pred_scores[0][idx] = random.random()
+        if featureid in target_featureids:
+            true_scores[0][idx] = 1.0
+    return ndcg_score(true_scores, pred_scores), cnt_new_gt_feature
+
+
+def get_auc_score_pred(pred_feature_scores, target_featureids, user2featuretf, item2featuretf):
+    user_featureids = set(user2featuretf.keys())
+    item_featureids = set(item2featuretf.keys())
+    useritem_featureids_union = user_featureids | item_featureids
+    pred_scores = np.zeros(len(useritem_featureids_union))
+    true_scores = np.zeros(len(useritem_featureids_union))
+    for idx, featureid in enumerate(list(useritem_featureids_union)):
+        if featureid in pred_feature_scores:
+            pred_scores[idx] = pred_feature_scores[featureid]
+        if featureid in target_featureids:
+            true_scores[idx] = 1.0
+    if sum(true_scores) == 0:
+        return 0
+    fpr, tpr, thresholds = metrics.roc_curve(true_scores, pred_scores, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+    return auc
+
+
+def get_auc_score_random(target_featureids, user2featuretf, item2featuretf):
+    user_featureids = set(user2featuretf.keys())
+    item_featureids = set(item2featuretf.keys())
+    useritem_featureids_union = user_featureids | item_featureids
+    useritem_featureids_inter = user_featureids & item_featureids
+    pred_scores = np.zeros(len(useritem_featureids_union))
+    true_scores = np.zeros(len(useritem_featureids_union))
+    for idx, featureid in enumerate(list(useritem_featureids_union)):
+        if featureid in useritem_featureids_inter:
+            pred_scores[idx] = random.random()
+        if featureid in target_featureids:
+            true_scores[idx] = 1.0
+    if sum(true_scores) == 0:
+        return 0
+    fpr, tpr, thresholds = metrics.roc_curve(true_scores, pred_scores, pos_label=1)
+    auc = metrics.auc(fpr, tpr)
+    return auc
 
 
 def get_recall_precision_f1(preds, targets, topk=26):
