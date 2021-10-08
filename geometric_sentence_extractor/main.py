@@ -114,13 +114,6 @@ def main(args):
             eval_obj.f_init_eval(network, args.model_file, reload_model=True)
             eval_obj.f_eval(train_data, valid_data)
 
-        elif args.eval_ILP:
-            print("Start ILP post-processing evaluation ...")
-            eval_obj = EVAL_ILP(vocab_obj, args, device)
-            network = network.to(device)
-            eval_obj.f_init_eval(network, args.model_file, reload_model=True)
-            eval_obj.f_eval(train_data, valid_data)
-
         else:
             print("Start sentence prediction evaluation ...")
             eval_obj = EVAL(vocab_obj, args, device)
@@ -155,6 +148,7 @@ if __name__ == "__main__":
     # parser.add_argument('--output_hidden_size', type=int, default=256)
     parser.add_argument('--head_num', type=int, default=4)
     parser.add_argument('--ffn_inner_hidden_size', type=int, default=256)
+    parser.add_argument('--cond_sentence', action='store_true', default=False)
 
     ### train
     parser.add_argument('--soft_label', action="store_true", default=False)
@@ -174,6 +168,8 @@ if __name__ == "__main__":
     parser.add_argument('--feat_finetune', action='store_true', default=False)
     parser.add_argument('--sent_finetune', action='store_true', default=False)
     parser.add_argument('--multi_task', action='store_true', default=False)
+    parser.add_argument('--valid_trigram', action='store_true', default=False)
+    parser.add_argument('--valid_trigram_feat', action='store_true', default=False)
 
     ### hyper-param
     # parser.add_argument('--init_mult', type=float, default=1.0)

@@ -25,14 +25,20 @@ class GraphX(nn.Module):
         self.m_total_sent_num = vocab_obj.sent_num
         self.m_train_sent_num = vocab_obj.train_sent_num
 
+        self.m_feature_finetune_flag = args.feat_finetune
+        self.m_sentence_finetune_flag = args.sent_finetune
+        self.m_conditioned_sentence_flag = args.cond_sentence
+        self.m_hidden_size = args.hidden_size
+
+        if self.m_conditioned_sentence_flag:
+            print("sentence predition conditioned on user&item")
+        else:
+            print("sentence predition only based on sentence node")
         print("user num", self.m_user_num)
         print("item num", self.m_item_num)
         print("feature num", self.m_feature_num)
         print("total sent num", self.m_total_sent_num)
         print("train sent num", self.m_train_sent_num)
-
-        self.m_feature_finetune_flag = args.feat_finetune
-        self.m_sentence_finetune_flag = args.sent_finetune
 
         self.m_user_embed = nn.Embedding(self.m_user_num, args.user_embed_size)
         self.m_item_embed = nn.Embedding(self.m_item_num, args.item_embed_size)
@@ -58,7 +64,10 @@ class GraphX(nn.Module):
         # self.output_hidden_size = args.output_hidden_size
         # self.wh = nn.Linear(self.output_hidden_size * 2, 2)
         # self.wh = nn.Linear(args.hidden_size, 2)
-        self.sent_output = nn.Linear(args.hidden_size, 1)
+        if self.m_conditioned_sentence_flag:
+            self.sent_ui_cond = nn.Linear(args.hidden_size*2, args.hidden_size)
+        else:
+            self.sent_output = nn.Linear(args.hidden_size, 1)
 
         self.feat_output = nn.Linear(args.hidden_size, 1)
 
@@ -76,7 +85,10 @@ class GraphX(nn.Module):
         nn.init.uniform_(self.item_state_proj.weight, a=-1e-3, b=1e-3)
 
         # nn.init.uniform_(self.wh.weight, a=-1e-3, b=1e-3)
-        nn.init.uniform_(self.sent_output.weight, a=-1e-3, b=1e-3)
+        if self.m_conditioned_sentence_flag:
+            nn.init.uniform_(self.sent_ui_cond.weight, a=-1e-3, b=1e-3)
+        else:
+            nn.init.uniform_(self.sent_output.weight, a=-1e-3, b=1e-3)
         nn.init.uniform_(self.feat_output.weight, a=-1e-3, b=1e-3)
 
     def f_load_feature_embedding(self, pre_feature_embed):
@@ -168,13 +180,11 @@ class GraphX(nn.Module):
             nnum_i = graph_batch[i].num_nodes
             debug_nnum_i = batch_fnum[i]+batch_snum[i]+2
             assert nnum_i == debug_nnum_i, "error node num"
-            # print("debug", debug_nnum_i, nnum_i)
-        
+
         x = torch.cat(x_batch, dim=0)
 
         # x = torch.cat([f_node_embed, s_node_embed, user_node_embed, item_node_embed], dim=0)
         graph_batch["x"] = x
-        # print("x", x)
 
         ## go through GAT
         #### hidden: node_num*hidden_size
@@ -185,8 +195,8 @@ class GraphX(nn.Module):
 
         ### list of sent_node_num*hidden_size
         hidden_s = []
-
         hidden_f = []
+        hidden_ui = []
 
         ### speed up
         ## fetch sentence hidden vectors from graph
@@ -194,20 +204,55 @@ class GraphX(nn.Module):
             g = graph_batch[batch_idx]
             hidden_g_i = hidden_batch[batch_idx]
 
+            # get sentence node hidden state
             s_nid = g.s_nid
+            # hidden_s_g_i: s_nid.size(0)*hidden_size
             hidden_s_g_i = hidden_g_i[s_nid]
             hidden_s.append(hidden_s_g_i)
 
+            # get feature node hidden state
             f_nid = g.f_nid
+            # hidden_f_g_i: f_nid.size(0)*hidden_size
             hidden_f_g_i = hidden_g_i[f_nid]
             hidden_f.append(hidden_f_g_i)
 
-        ### make predictions
+            if self.m_conditioned_sentence_flag:
+                # get user node hidden state
+                u_nid = g.u_nid
+                hidden_u_g_i = hidden_g_i[u_nid]
+                # get item node hidden state
+                i_nid = g.i_nid
+                hidden_i_g_i = hidden_g_i[i_nid]
+                # hidden_ui_g_i: 1*(hidden_size*2)
+                hidden_ui_g_i = torch.cat([hidden_u_g_i, hidden_i_g_i], dim=-1)
+                # hidden_ui_g_i_s: s_nid.size(0)*(hidden_size*2)
+                hidden_ui_g_i_s = hidden_ui_g_i.repeat(s_nid.size(0), 1)
+                # print("hidden_ui_g_i_s shape:", hidden_ui_g_i_s.shape)
+                hidden_ui.append(hidden_ui_g_i_s)
 
-        ### hidden_s_batch: s_node_num*hidden_size
-        hidden_s = torch.cat(hidden_s, dim=0)
-        ### logits: s_node_num*1
-        logits_s = self.sent_output(hidden_s)
+        ### make predictions
+        if self.m_conditioned_sentence_flag:
+            # hidden_ui: s_node_num*(hidden_size*2)
+            hidden_ui = torch.cat(hidden_ui, dim=0)
+            # print("hidden_ui shape:", hidden_ui.shape)
+            # hidden_s: s_node_num*hidden_size
+            hidden_s = torch.cat(hidden_s, dim=0)
+            # print("hidden_s shape:", hidden_s.shape)
+            assert hidden_s.size(0) == hidden_ui.size(0)
+            # hidden_ui: s_node_num*hidden_size
+            hidden_ui = self.sent_ui_cond(hidden_ui)
+            # print("after linear layer, hidden_ui shape:", hidden_ui.shape)
+            # logits_s: s_node_num*1
+            logits_s = torch.bmm(
+                hidden_ui.unsqueeze(1),
+                hidden_s.unsqueeze(-1)
+            ).squeeze(-1)
+            # print("logits_s shape:", logits_s.shape)
+        else:
+            ### hidden_s_batch: s_node_num*hidden_size
+            hidden_s = torch.cat(hidden_s, dim=0)
+            ### logits: s_node_num*1
+            logits_s = self.sent_output(hidden_s)
 
         hidden_f = torch.cat(hidden_f, dim=0)
         logits_f = self.feat_output(hidden_f)
@@ -215,12 +260,8 @@ class GraphX(nn.Module):
         return logits_s, logits_f
 
     def eval_forward(self, graph_batch, get_embedding=False):
-        ## init node embeddings
-
-        ##### feature node
-        
         batch_size = graph_batch.num_graphs
-
+        ##### feature node
         fid = graph_batch.f_rawid
         f_embed = self.m_feature_embed(fid)
         f_node_embed = self.feature_state_proj(f_embed)
@@ -276,6 +317,7 @@ class GraphX(nn.Module):
 
         ### list of 1*max_sent_node_num_per_g*hidden_size
         hidden_s_batch = []
+        hidden_ui_batch = []
         sid_batch = []
         mask_s_batch = []
         target_sid_batch = []
@@ -288,13 +330,11 @@ class GraphX(nn.Module):
         max_f_num_batch = 0
 
         for batch_idx in range(batch_size):
-        # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]
             hidden_g_i = hidden_batch[batch_idx]
 
             s_nid = g.s_nid
             s_num = s_nid.size(0)
-
             max_s_num_batch = max(max_s_num_batch, s_num)
 
             f_nid = g.f_nid
@@ -304,7 +344,6 @@ class GraphX(nn.Module):
 
         ## fetch sentence hidden vectors
         for batch_idx in range(batch_size):
-        # for g_idx, g in enumerate(graph_batch):
             g = graph_batch[batch_idx]
             hidden_g_i = hidden_batch[batch_idx]
 
@@ -317,6 +356,15 @@ class GraphX(nn.Module):
             pad_s_g_i = torch.zeros(pad_s_num, hidden_s_g_i.size(1)).to(self.m_device)
             hidden_pad_s_g_i = torch.cat([hidden_s_g_i, pad_s_g_i], dim=0)
             hidden_s_batch.append(hidden_pad_s_g_i.unsqueeze(0))
+            if self.m_conditioned_sentence_flag:
+                u_nid = g.u_nid
+                hidden_u_g_i = hidden_g_i[u_nid]
+                i_nid = g.i_nid
+                hidden_i_g_i = hidden_g_i[i_nid]
+                hidden_ui_g_i = torch.cat([hidden_u_g_i, hidden_i_g_i], dim=-1)
+                hidden_ui_g_i_s = hidden_ui_g_i.repeat(max_s_num_batch, 1)
+                # print("hidden_ui_g_i_s shape:", hidden_ui_g_i_s.shape)
+                hidden_ui_batch.append(hidden_ui_g_i_s.unsqueeze(0))
 
             #### pad id can be further improved
             sid = g.s_rawid
@@ -357,21 +405,48 @@ class GraphX(nn.Module):
             target_f_label_i = g.f_label
             target_f_label_batch.append(target_f_label_i)
 
-
-        #### hidden_s_batch: batch_size*max_s_num_batch*hidden_size
+        # hidden_s_batch: batch_size*max_s_num_batch*hidden_size
         hidden_s_batch = torch.cat(hidden_s_batch, dim=0)
 
-        ### sid_batch: batch_size*max_s_num_batch
+        # sid_batch: batch_size*max_s_num_batch
         sid_batch = torch.cat(sid_batch, dim=0)
 
-        ### mask_s_batch: batch_size*max_s_num_batch
+        # mask_s_batch: batch_size*max_s_num_batch
         mask_s_batch = torch.cat(mask_s_batch, dim=0)
 
-        ### make predictions
-        #### logits: batch_size*max_s_num_batch*1
-        s_logits = self.sent_output(hidden_s_batch)
-        s_logits = s_logits.squeeze(-1)
-        s_logits = torch.sigmoid(s_logits)*mask_s_batch
+        # make predictions
+        if self.m_conditioned_sentence_flag:
+            # hidden_ui_batch: batch_size*max_s_num_batch*(2 hidden_size)
+            hidden_ui_batch = torch.cat(hidden_ui_batch, dim=0)
+            # print("hidden_ui_batch:", hidden_ui_batch.shape)
+            # s_logits: batch_size*max_s_num_batch*hidden_size
+            s_logits = self.sent_ui_cond(hidden_ui_batch)
+            # print("s_logits shape:", s_logits.shape)
+            # s_logits: batch_size*max_s_num_batch
+            """ bmm
+            bmm:
+                (batch_size*max_s_num_batch, 1, hidden_size) *
+                (batch_size*max_s_num_batch, hidden_size, 1)
+            after bmm:
+                (batch_size*max_s_num_batch, 1, 1)
+            after reshape:
+                (batch_size, max_s_num_batch)
+            """
+            s_logits = torch.bmm(
+                s_logits.unsqueeze(2).view(-1, 1, self.m_hidden_size),
+                hidden_s_batch.unsqueeze(-1).view(-1, self.m_hidden_size, 1)
+            ).view(batch_size, -1)
+            # print("after bmm, s_logits shape:", s_logits.shape)
+            # s_logits: batch_size*max_s_num_batch
+            s_logits = torch.sigmoid(s_logits)*mask_s_batch
+            # print("after sigmoid, s_logits shape:", s_logits.shape)
+
+        else:
+            # s_logits: batch_size*max_s_num_batch*1
+            s_logits = self.sent_output(hidden_s_batch)
+            # s_logits: batch_size*max_s_num_batch
+            s_logits = s_logits.squeeze(-1)
+            s_logits = torch.sigmoid(s_logits)*mask_s_batch
 
         hidden_f_batch = torch.cat(hidden_f_batch, dim=0)
         fid_batch = torch.cat(fid_batch, dim=0)
